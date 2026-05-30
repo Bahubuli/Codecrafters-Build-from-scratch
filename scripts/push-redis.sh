@@ -23,7 +23,9 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 git clone --branch master --single-branch "$remote_url" "$tmp_dir/redis"
-rsync -a --delete --exclude .git "$PROJECT_DIR"/ "$tmp_dir/redis"/
+mkdir -p "$tmp_dir/export"
+git -C "$ROOT_DIR" archive HEAD codecrafters-redis-java | tar -x -C "$tmp_dir/export"
+rsync -a --delete --exclude .git "$tmp_dir/export/codecrafters-redis-java"/ "$tmp_dir/redis"/
 
 if [[ -z "$(git -C "$tmp_dir/redis" status --porcelain)" ]]; then
   echo "No Redis changes to submit to CodeCrafters."
