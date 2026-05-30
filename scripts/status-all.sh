@@ -7,9 +7,5 @@ echo "== parent =="
 git -C "$ROOT_DIR" status --short --branch
 echo
 
-echo "== codecrafters-redis-java =="
-git -C "$ROOT_DIR/codecrafters-redis-java" status --short --branch
-echo
-
-echo "== child remotes =="
-git -C "$ROOT_DIR/codecrafters-redis-java" remote -v
+echo "== remotes =="
+git -C "$ROOT_DIR" remote -v

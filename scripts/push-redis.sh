@@ -3,37 +3,33 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_DIR="$ROOT_DIR/codecrafters-redis-java"
+REMOTE_NAME="${CODECRAFTERS_REDIS_REMOTE:-redis-codecrafters}"
+COMMIT_MESSAGE="${1:-Sync Redis from monorepo}"
 
-if [[ -n "$(git -C "$PROJECT_DIR" status --porcelain)" ]]; then
-  echo "Commit or stash changes in codecrafters-redis-java before pushing." >&2
-  git -C "$PROJECT_DIR" status --short
+if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
+  echo "Commit or stash parent repo changes before submitting to CodeCrafters." >&2
+  git -C "$ROOT_DIR" status --short
   exit 1
 fi
 
-codecrafters_remote="$(
-  git -C "$PROJECT_DIR" remote -v |
-    awk '$2 ~ /git\.codecrafters\.io/ && $3 == "(push)" { print $1; exit }'
-)"
-
-if [[ -z "$codecrafters_remote" ]]; then
-  echo "No CodeCrafters remote found for codecrafters-redis-java." >&2
-  echo "Add the remote from your CodeCrafters setup page, then run again." >&2
+remote_url="$(git -C "$ROOT_DIR" remote get-url "$REMOTE_NAME" 2>/dev/null || true)"
+if [[ -z "$remote_url" ]]; then
+  echo "No '$REMOTE_NAME' remote found in the parent repo." >&2
+  echo "Add it with: git remote add $REMOTE_NAME <codecrafters-git-url>" >&2
   exit 1
 fi
 
-git -C "$PROJECT_DIR" push "$codecrafters_remote" master
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
 
-github_remote="$(
-  git -C "$PROJECT_DIR" remote -v |
-    awk '$2 ~ /github\.com/ && $3 == "(push)" { print $1; exit }'
-)"
+git clone --branch master --single-branch "$remote_url" "$tmp_dir/redis"
+rsync -a --delete --exclude .git "$PROJECT_DIR"/ "$tmp_dir/redis"/
 
-if [[ -n "$github_remote" ]]; then
-  git -C "$PROJECT_DIR" push "$github_remote" master
+if [[ -z "$(git -C "$tmp_dir/redis" status --porcelain)" ]]; then
+  echo "No Redis changes to submit to CodeCrafters."
+  exit 0
 fi
 
-echo
-echo "Redis child pushed. Now update and push the parent pointer:"
-echo "  git add codecrafters-redis-java"
-echo "  git commit -m \"Update Redis project pointer\""
-echo "  git push origin master"
+git -C "$tmp_dir/redis" add -A
+git -C "$tmp_dir/redis" commit -m "$COMMIT_MESSAGE"
+git -C "$tmp_dir/redis" push origin master
