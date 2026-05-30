@@ -1,4 +1,5 @@
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.io.OutputStream;
@@ -22,8 +23,21 @@ public class Main {
 
          // get client output stream 
          OutputStream clientOutPutStream = clientSocket.getOutputStream();
-         clientOutPutStream.write("+PONG\r\n".getBytes(StandardCharsets.UTF_8));
-         clientOutPutStream.flush();
+
+         // get client input stream 
+         InputStream clientInputStream = clientSocket.getInputStream();
+         byte[] buffer = new byte[1024];
+
+         while(true)
+         {
+          int bytesRead = clientInputStream.read(buffer);
+          if(bytesRead == -1)
+            break;
+
+           clientOutPutStream.write("+PONG\r\n".getBytes(StandardCharsets.UTF_8));
+           clientOutPutStream.flush();
+         }
+
          // write PONG response to client 
        } catch (IOException e) {
          System.out.println("IOException: " + e.getMessage());
