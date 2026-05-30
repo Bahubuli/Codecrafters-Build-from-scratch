@@ -1,0 +1,4 @@
+[submodule "codecrafters-redis-java"]
+	path = codecrafters-redis-java
+	url = https://github.com/Bahubuli/codecrafters-redis-java.git
+	branch = master
