@@ -30,6 +30,8 @@ public class Main {
               byte[] buffer = new byte[1024];
 
               while(true){
+                // here if connection closed we get -1 
+                // otherwise thread is blocked and waits for the input
                 int bytesRead = in.read(buffer);
                 if(bytesRead==-1) break;
                 out.write("+PONG\r\n".getBytes(StandardCharsets.UTF_8));
