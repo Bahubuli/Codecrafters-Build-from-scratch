@@ -10,7 +10,21 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Main {
-  private static final Map<String, String> store = new ConcurrentHashMap<>();
+  private static class Entry {
+    final String value;
+    final Long expiresAt;
+
+    Entry(String value, Long expiresAt) {
+      this.value = value;
+      this.expiresAt = expiresAt;
+    }
+
+    boolean isExpired() {
+      return expiresAt != null && System.currentTimeMillis() > expiresAt;
+    }
+  }
+
+  private static final Map<String, Entry> store = new ConcurrentHashMap<>();
 
   public static void main(String[] args) {
     System.out.println("Logs from your program will appear here!");
@@ -32,18 +46,18 @@ public class Main {
 
             while (true) {
               String line = reader.readLine();
-              if (line == null) break; // client closed the connection
+              if (line == null) break; // client disconnected
 
-              // RESP array header. line = "*<count>"
               int n = Integer.parseInt(line.substring(1));
 
               String[] parts = new String[n];
               for (int i = 0; i < n; i++) {
-                reader.readLine();            // "$<len>" line — skipped
-                parts[i] = reader.readLine(); // payload itself
+                reader.readLine();            // Skip "$<len>"
+                parts[i] = reader.readLine(); // Payload
               }
 
               String command = parts[0];
+
               if (command.equalsIgnoreCase("PING")) {
                 out.write("+PONG\r\n".getBytes(StandardCharsets.UTF_8));
               } else if (command.equalsIgnoreCase("ECHO")) {
@@ -54,16 +68,32 @@ public class Main {
               } else if (command.equalsIgnoreCase("SET")) {
                 String key = parts[1];
                 String value = parts[2];
-                store.put(key, value);
+                Long expiresAt = null;
+
+                if (parts.length >= 5) {
+                  if (parts[3].equalsIgnoreCase("PX")) {
+                    long pxMillis = Long.parseLong(parts[4]);
+                    expiresAt = System.currentTimeMillis() + pxMillis;
+                  } else if (parts[3].equalsIgnoreCase("EX")) {
+                    long exSeconds = Long.parseLong(parts[4]);
+                    expiresAt = System.currentTimeMillis() + (exSeconds * 1000);
+                  }
+                }
+
+                store.put(key, new Entry(value, expiresAt));
                 out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
               } else if (command.equalsIgnoreCase("GET")) {
                 String key = parts[1];
-                String value = store.get(key);
-                if (value != null) {
-                  byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-                  String response = "$" + bytes.length + "\r\n" + value + "\r\n";
+                Entry entry = store.get(key);
+
+                if (entry != null && !entry.isExpired()) {
+                  byte[] bytes = entry.value.getBytes(StandardCharsets.UTF_8);
+                  String response = "$" + bytes.length + "\r\n" + entry.value + "\r\n";
                   out.write(response.getBytes(StandardCharsets.UTF_8));
                 } else {
+                  if (entry != null && entry.isExpired()) {
+                    store.remove(key);
+                  }
                   out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
                 }
               }
