@@ -6,22 +6,22 @@ import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class Main {
+  private static final Map<String, String> store = new ConcurrentHashMap<>();
+
   public static void main(String[] args) {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
     System.out.println("Logs from your program will appear here!");
 
     int port = 6379;
 
     try {
       ServerSocket serverSocket = new ServerSocket(port);
-      // Since the tester restarts your program quite often, setting SO_REUSEADDR
-      // ensures that we don't run into 'Address already in use' errors
       serverSocket.setReuseAddress(true);
 
       while (true) {
-        // main thread does ONLY this: accept, hand off to a worker, loop back
         Socket clientSocket = serverSocket.accept();
 
         new Thread(() -> {
@@ -30,39 +30,44 @@ public class Main {
             InputStream in = clientSocket.getInputStream();
             BufferedReader reader = new BufferedReader(new InputStreamReader(in));
 
-            // Example incoming command:  *2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n
-            // readLine() strips the \r\n, so we get one clean line at a time:
-            //   "*2", then "$4", "ECHO", "$3", "hey"
             while (true) {
               String line = reader.readLine();
               if (line == null) break; // client closed the connection
 
-              // RESP array header. line = "*2"
-              //   line.substring(1)  -> "2"   (dropped the '*' type marker)
-              //   Integer.parseInt   -> 2     (text "2" becomes the number 2)
-              // n = how many elements (bulk strings) follow.
+              // RESP array header. line = "*<count>"
               int n = Integer.parseInt(line.substring(1));
 
               String[] parts = new String[n];
               for (int i = 0; i < n; i++) {
-                // Each element is two lines: a "$<len>" header, then the payload.
-                reader.readLine();            // "$4" length line — skipped (readLine already framed it)
-                parts[i] = reader.readLine(); // the payload itself: "ECHO", then "hey"
+                reader.readLine();            // "$<len>" line — skipped
+                parts[i] = reader.readLine(); // payload itself
               }
-              // After the loop: parts = ["ECHO", "hey"]
 
-              String command = parts[0]; // "ECHO"  (element 0 = command name)
-              if (command.equalsIgnoreCase("ECHO")) {
-                String arg = parts[1]; // "hey"  (element 1 = the argument to echo back)
-                // Encode arg as a RESP bulk string: "$<len>\r\n<arg>\r\n"
-                //   arg = "hey", arg.length() = 3  ->  response = "$3\r\nhey\r\n"
-                String response = "$" + arg.length() + "\r\n" + arg + "\r\n";
-                out.write(response.getBytes(StandardCharsets.UTF_8));
-                out.flush();
-              } else if (command.equalsIgnoreCase("PING")) {
+              String command = parts[0];
+              if (command.equalsIgnoreCase("PING")) {
                 out.write("+PONG\r\n".getBytes(StandardCharsets.UTF_8));
-                out.flush();
+              } else if (command.equalsIgnoreCase("ECHO")) {
+                String arg = parts[1];
+                byte[] bytes = arg.getBytes(StandardCharsets.UTF_8);
+                String response = "$" + bytes.length + "\r\n" + arg + "\r\n";
+                out.write(response.getBytes(StandardCharsets.UTF_8));
+              } else if (command.equalsIgnoreCase("SET")) {
+                String key = parts[1];
+                String value = parts[2];
+                store.put(key, value);
+                out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
+              } else if (command.equalsIgnoreCase("GET")) {
+                String key = parts[1];
+                String value = store.get(key);
+                if (value != null) {
+                  byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+                  String response = "$" + bytes.length + "\r\n" + value + "\r\n";
+                  out.write(response.getBytes(StandardCharsets.UTF_8));
+                } else {
+                  out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
+                }
               }
+              out.flush();
             }
           } catch (IOException e) {
             System.out.println("IOException: " + e.getMessage());
