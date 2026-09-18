@@ -40,13 +40,13 @@ def get_firefox_cookies():
 
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT host, name, value, path, isSecure, isHttpOnly FROM moz_cookies WHERE host LIKE '%github.com%' OR host LIKE '%codecrafters.io%'")
-    cookie_rows = cursor.fetchall()
+    cursor.execute("SELECT name, value, host, path, isSecure, isHttpOnly FROM moz_cookies WHERE host LIKE '%codecrafters.io%'")
+    rows = cursor.fetchall()
     conn.close()
 
     cookies = []
-    for host, name, val, path, is_sec, is_http in cookie_rows:
-        domain = host if host.startswith(".") else "." + host
+    for name, val, host, path, is_sec, is_http in rows:
+        domain = host if host.startswith(".") else f".{host}"
         cookies.append({
             "name": name,
             "value": val,
@@ -58,8 +58,13 @@ def get_firefox_cookies():
     return cookies
 
 def main():
-    course = sys.argv[1] if len(sys.argv) > 1 else "redis"
-    target_url = f"https://app.codecrafters.io/courses/{course}/overview"
+    arg = sys.argv[1] if len(sys.argv) > 1 else "redis"
+    if arg.startswith("http://") or arg.startswith("https://"):
+        target_url = arg
+    elif "/" in arg:
+        target_url = f"https://app.codecrafters.io/courses/{arg}"
+    else:
+        target_url = f"https://app.codecrafters.io/courses/{arg}/overview"
 
     ff_cookies = get_firefox_cookies()
     print(f"Loaded {len(ff_cookies)} cookies from Firefox profile.")
