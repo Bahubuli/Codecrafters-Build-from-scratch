@@ -533,6 +533,16 @@ public class Main {
         return spans;
     }
 
+    static class MatchResult {
+        final int endPos;
+        final Map<Integer, String> capturedGroups;
+
+        MatchResult(int endPos, Map<Integer, String> capturedGroups) {
+            this.endPos = endPos;
+            this.capturedGroups = capturedGroups;
+        }
+    }
+
     private static int matchEndNodesAt(
         String inputLine,
         int textIdx,
@@ -570,12 +580,12 @@ public class Main {
         } else if (current instanceof GroupNode) {
             GroupNode gn = (GroupNode) current;
             for (List<PatternNode> branch : gn.branches) {
-                List<Integer> branchEnds = new ArrayList<>();
-                findBranchMatches(inputLine, textIdx, branch, 0, capturedGroups, branchEnds);
-                for (int endPos : branchEnds) {
-                    Map<Integer, String> newCaptured = new HashMap<>(capturedGroups);
-                    newCaptured.put(gn.groupId, inputLine.substring(textIdx, endPos));
-                    int res = matchEndNodesAt(inputLine, endPos, nodes, nodeIdx + 1, anchorEnd, newCaptured);
+                List<MatchResult> branchResults = new ArrayList<>();
+                findBranchMatches(inputLine, textIdx, branch, 0, capturedGroups, branchResults);
+                for (MatchResult mr : branchResults) {
+                    Map<Integer, String> newCaptured = new HashMap<>(mr.capturedGroups);
+                    newCaptured.put(gn.groupId, inputLine.substring(textIdx, mr.endPos));
+                    int res = matchEndNodesAt(inputLine, mr.endPos, nodes, nodeIdx + 1, anchorEnd, newCaptured);
                     if (res != -1) {
                         return res;
                     }
@@ -620,10 +630,10 @@ public class Main {
         List<PatternNode> branchNodes,
         int bIdx,
         Map<Integer, String> capturedGroups,
-        List<Integer> endPositions
+        List<MatchResult> results
     ) {
         if (bIdx == branchNodes.size()) {
-            endPositions.add(textIdx);
+            results.add(new MatchResult(textIdx, new HashMap<>(capturedGroups)));
             return;
         }
 
@@ -637,22 +647,22 @@ public class Main {
             }
             if (count >= q.min) {
                 for (int len = count; len >= q.min; len--) {
-                    findBranchMatches(inputLine, textIdx + len, branchNodes, bIdx + 1, capturedGroups, endPositions);
+                    findBranchMatches(inputLine, textIdx + len, branchNodes, bIdx + 1, capturedGroups, results);
                 }
             }
         } else if (current instanceof GroupNode) {
             GroupNode gn = (GroupNode) current;
             for (List<PatternNode> branch : gn.branches) {
-                List<Integer> branchEnds = new ArrayList<>();
-                findBranchMatches(inputLine, textIdx, branch, 0, capturedGroups, branchEnds);
-                for (int endPos : branchEnds) {
-                    Map<Integer, String> newCaptured = new HashMap<>(capturedGroups);
-                    newCaptured.put(gn.groupId, inputLine.substring(textIdx, endPos));
-                    findBranchMatches(inputLine, endPos, branchNodes, bIdx + 1, newCaptured, endPositions);
+                List<MatchResult> branchResults = new ArrayList<>();
+                findBranchMatches(inputLine, textIdx, branch, 0, capturedGroups, branchResults);
+                for (MatchResult mr : branchResults) {
+                    Map<Integer, String> newCaptured = new HashMap<>(mr.capturedGroups);
+                    newCaptured.put(gn.groupId, inputLine.substring(textIdx, mr.endPos));
+                    findBranchMatches(inputLine, mr.endPos, branchNodes, bIdx + 1, newCaptured, results);
                 }
             }
             if (gn.quantifier.min == 0) {
-                findBranchMatches(inputLine, textIdx, branchNodes, bIdx + 1, capturedGroups, endPositions);
+                findBranchMatches(inputLine, textIdx, branchNodes, bIdx + 1, capturedGroups, results);
             }
         } else if (current instanceof BackreferenceNode) {
             BackreferenceNode bn = (BackreferenceNode) current;
@@ -660,7 +670,7 @@ public class Main {
             if (captured != null) {
                 Quantifier q = bn.quantifier;
                 if (captured.isEmpty()) {
-                    findBranchMatches(inputLine, textIdx, branchNodes, bIdx + 1, capturedGroups, endPositions);
+                    findBranchMatches(inputLine, textIdx, branchNodes, bIdx + 1, capturedGroups, results);
                 } else {
                     int count = 0;
                     while (textIdx + (count + 1) * captured.length() <= inputLine.length() && count < q.max
@@ -669,7 +679,7 @@ public class Main {
                     }
                     if (count >= q.min) {
                         for (int rep = count; rep >= q.min; rep--) {
-                            findBranchMatches(inputLine, textIdx + rep * captured.length(), branchNodes, bIdx + 1, capturedGroups, endPositions);
+                            findBranchMatches(inputLine, textIdx + rep * captured.length(), branchNodes, bIdx + 1, capturedGroups, results);
                         }
                     }
                 }
