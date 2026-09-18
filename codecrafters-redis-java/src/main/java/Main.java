@@ -30,10 +30,18 @@ import java.util.concurrent.TimeoutException;
 public class Main {
   private static class Entry {
     final String value;
+    final byte[] rawBytes;
     final Long expiresAt;
 
     Entry(String value, Long expiresAt) {
       this.value = value;
+      this.rawBytes = value.getBytes(StandardCharsets.ISO_8859_1);
+      this.expiresAt = expiresAt;
+    }
+
+    Entry(byte[] rawBytes, Long expiresAt) {
+      this.rawBytes = rawBytes;
+      this.value = new String(rawBytes, StandardCharsets.ISO_8859_1);
       this.expiresAt = expiresAt;
     }
 
@@ -792,9 +800,10 @@ public class Main {
       }
 
       if (entry != null && !entry.isExpired()) {
-        byte[] bytes = entry.value.getBytes(StandardCharsets.UTF_8);
-        String response = "$" + bytes.length + "\r\n" + entry.value + "\r\n";
-        out.write(response.getBytes(StandardCharsets.UTF_8));
+        byte[] bytes = entry.rawBytes;
+        out.write(("$" + bytes.length + "\r\n").getBytes(StandardCharsets.UTF_8));
+        out.write(bytes);
+        out.write("\r\n".getBytes(StandardCharsets.UTF_8));
       } else {
         if (entry != null && entry.isExpired()) {
           store.remove(key);
@@ -804,6 +813,82 @@ public class Main {
         }
         out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
       }
+      out.flush();
+    } else if (command.equalsIgnoreCase("SETBIT")) {
+      if (parts.length < 4) {
+        out.write("-ERR wrong number of arguments for 'setbit' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+      String rawKey = parts[1];
+      String key = stripQuotes(rawKey);
+
+      long offset;
+      try {
+        offset = Long.parseLong(parts[2]);
+      } catch (NumberFormatException e) {
+        out.write("-ERR bit offset is not an integer or out of range\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+      if (offset < 0) {
+        out.write("-ERR bit offset is not an integer or out of range\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+
+      int bitVal;
+      try {
+        bitVal = Integer.parseInt(parts[3]);
+      } catch (NumberFormatException e) {
+        out.write("-ERR bit is not an integer or out of range\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+      if (bitVal != 0 && bitVal != 1) {
+        out.write("-ERR bit is not an integer or out of range\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+
+      Entry entry = store.get(key);
+      if (entry == null && !key.equals(rawKey)) {
+        entry = store.get(rawKey);
+      }
+      if (entry != null && entry.isExpired()) {
+        store.remove(key);
+        entry = null;
+      }
+
+      byte[] currentBytes = (entry != null) ? entry.rawBytes : new byte[0];
+      int byteIndex = (int) (offset / 8);
+      int bitIndex = 7 - (int) (offset % 8);
+      int bitMask = 1 << bitIndex;
+
+      byte[] newBytes;
+      if (byteIndex >= currentBytes.length) {
+        newBytes = java.util.Arrays.copyOf(currentBytes, byteIndex + 1);
+      } else {
+        newBytes = java.util.Arrays.copyOf(currentBytes, currentBytes.length);
+      }
+
+      int oldBit = 0;
+      if (byteIndex < currentBytes.length) {
+        oldBit = (currentBytes[byteIndex] & bitMask) != 0 ? 1 : 0;
+      }
+
+      if (bitVal == 1) {
+        newBytes[byteIndex] = (byte) (newBytes[byteIndex] | bitMask);
+      } else {
+        newBytes[byteIndex] = (byte) (newBytes[byteIndex] & ~bitMask);
+      }
+
+      Long expiresAt = (entry != null) ? entry.expiresAt : null;
+      store.put(key, new Entry(newBytes, expiresAt));
+      touchWatchedKey(key);
+      appendToAof(parts);
+
+      out.write((":" + oldBit + "\r\n").getBytes(StandardCharsets.UTF_8));
       out.flush();
     } else if (command.equalsIgnoreCase("INCR")) {
       if (parts.length < 2) {
