@@ -14,7 +14,7 @@ public class Main {
                 serverSocket.receive(packet);
                 System.out.println("Received packet from " + packet.getSocketAddress());
 
-                // Stage 6: Parse request header and question sections, reflect query parameters
+                // Stage 7: Parse compressed packets and multiple questions, reflect query parameters
                 byte[] requestBytes = Arrays.copyOfRange(packet.getData(), 0, packet.getLength());
                 DnsMessage requestMessage = DnsMessage.parse(requestBytes);
                 DnsHeader reqHeader = requestMessage.getHeader();
