@@ -1054,6 +1054,14 @@ public class Main {
       if (parts.length >= 2 && parts[1].equalsIgnoreCase("WHOAMI")) {
         out.write("$7\r\ndefault\r\n".getBytes(StandardCharsets.UTF_8));
         out.flush();
+      } else if (parts.length >= 3 && parts[1].equalsIgnoreCase("GETUSER")) {
+        String username = parts[2];
+        if (username.equals("default")) {
+          out.write("*2\r\n$5\r\nflags\r\n*0\r\n".getBytes(StandardCharsets.UTF_8));
+        } else {
+          out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
+        }
+        out.flush();
       } else {
         out.write("-ERR unknown subcommand or wrong number of arguments for 'ACL'\r\n".getBytes(StandardCharsets.UTF_8));
         out.flush();
