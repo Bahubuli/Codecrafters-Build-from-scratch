@@ -117,10 +117,12 @@ public class Main {
   private static Socket masterSocket = null;
 
   private static String masterReplId = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
-  private static long masterReplOffset = 0;
+  private static volatile long masterReplOffset = 0;
   private static final String EMPTY_RDB_BASE64 =
       "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==";
   private static final CopyOnWriteArrayList<OutputStream> replicas = new CopyOnWriteArrayList<>();
+  private static final Map<OutputStream, Long> replicaAcks = new ConcurrentHashMap<>();
+  private static final Object waitLock = new Object();
 
   private static String getInfoReplication() {
     if ("master".equalsIgnoreCase(role)) {
@@ -151,10 +153,24 @@ public class Main {
         }
       } catch (IOException e) {
         replicas.remove(replicaOut);
+        replicaAcks.remove(replicaOut);
+        synchronized (waitLock) {
+          waitLock.notifyAll();
+        }
       }
     }
   }
 
+  private static int countAcknowledgedReplicas(long targetOffset) {
+    int count = 0;
+    for (OutputStream replicaOut : replicas) {
+      Long ack = replicaAcks.get(replicaOut);
+      if (ack != null && ack >= targetOffset) {
+        count++;
+      }
+    }
+    return count;
+  }
 
   private static Object getLock(String key) {
     return keyLocks.computeIfAbsent(key, k -> new Object());
@@ -900,8 +916,18 @@ public class Main {
         }
       }
     } else if (command.equalsIgnoreCase("REPLCONF")) {
-      // Stage 58: Replication handshake - master responds +OK to REPLCONF listening-port and REPLCONF capa
-      out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
+      // Stage 58 & 68: Replication handshake and ACK handling
+      if (parts.length >= 3 && parts[1].equalsIgnoreCase("ACK")) {
+        try {
+          long ackOffset = Long.parseLong(parts[2].trim());
+          replicaAcks.put(out, ackOffset);
+          synchronized (waitLock) {
+            waitLock.notifyAll();
+          }
+        } catch (NumberFormatException ignored) {}
+      } else {
+        out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
+      }
     } else if (command.equalsIgnoreCase("PSYNC")) {
       // Stage 59: Replication handshake - master responds +FULLRESYNC <masterReplId> 0\r\n
       String response = "+FULLRESYNC " + masterReplId + " 0\r\n";
@@ -914,8 +940,9 @@ public class Main {
       out.write(rdbBytes);
       out.flush();
 
-      // Track replica connection for subsequent command propagation
+      // Track replica connection for subsequent command propagation and ACK tracking
       replicas.addIfAbsent(out);
+      replicaAcks.put(out, 0L);
     } else if (command.equalsIgnoreCase("INFO")) {
       String info = getInfoReplication();
       byte[] bytes = info.getBytes(StandardCharsets.UTF_8);
@@ -924,17 +951,73 @@ public class Main {
     } else if (command.equalsIgnoreCase("UNWATCH")) {
       out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
     } else if (command.equalsIgnoreCase("WAIT")) {
-      // Stage 67: WAIT with no commands (#tu8)
+      // Stage 68: WAIT with multiple commands (#na2)
       // Format: WAIT <numreplicas> <timeout>
-      // When no write commands have been sent yet (masterReplOffset == 0) or replicas.isEmpty(),
-      // all connected replicas are already in sync at offset 0. Return the count of connected replicas immediately.
       int numReplicas = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
       long timeout = parts.length > 2 ? Long.parseLong(parts[2]) : 0;
-      if (masterReplOffset == 0 || replicas.isEmpty()) {
-        out.write((":" + replicas.size() + "\r\n").getBytes(StandardCharsets.UTF_8));
-      } else {
-        out.write((":" + replicas.size() + "\r\n").getBytes(StandardCharsets.UTF_8));
+
+      if (replicas.isEmpty()) {
+        out.write(":0\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
       }
+
+      if (masterReplOffset == 0 || numReplicas == 0) {
+        out.write((":" + replicas.size() + "\r\n").getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+
+      long targetOffset = masterReplOffset;
+
+      // Send REPLCONF GETACK * to all connected replicas
+      byte[] getackMsg = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n".getBytes(StandardCharsets.UTF_8);
+      for (OutputStream replicaOut : replicas) {
+        try {
+          synchronized (replicaOut) {
+            replicaOut.write(getackMsg);
+            replicaOut.flush();
+          }
+        } catch (IOException e) {
+          replicas.remove(replicaOut);
+          replicaAcks.remove(replicaOut);
+          synchronized (waitLock) {
+            waitLock.notifyAll();
+          }
+        }
+      }
+
+      long deadline = (timeout > 0) ? System.currentTimeMillis() + timeout : Long.MAX_VALUE;
+      synchronized (waitLock) {
+        while (countAcknowledgedReplicas(targetOffset) < numReplicas) {
+          if (replicas.isEmpty()) {
+            break;
+          }
+          if (timeout > 0) {
+            long remaining = deadline - System.currentTimeMillis();
+            if (remaining <= 0) {
+              break;
+            }
+            try {
+              waitLock.wait(remaining);
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              break;
+            }
+          } else {
+            try {
+              waitLock.wait();
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              break;
+            }
+          }
+        }
+      }
+
+      int ackedCount = countAcknowledgedReplicas(targetOffset);
+      out.write((":" + ackedCount + "\r\n").getBytes(StandardCharsets.UTF_8));
+      out.flush();
     }
   }
 
@@ -1134,13 +1217,25 @@ public class Main {
             while (true) {
               String line = reader.readLine();
               if (line == null) break; // client disconnected
+              line = line.trim();
+              if (line.isEmpty()) continue;
 
-              int n = Integer.parseInt(line.substring(1));
-
-              String[] parts = new String[n];
-              for (int i = 0; i < n; i++) {
-                reader.readLine();            // Skip "$<len>"
-                parts[i] = reader.readLine(); // Payload
+              String[] parts;
+              if (line.startsWith("*")) {
+                int n = Integer.parseInt(line.substring(1).trim());
+                parts = new String[n];
+                boolean broken = false;
+                for (int i = 0; i < n; i++) {
+                  reader.readLine();            // Skip "$<len>"
+                  parts[i] = reader.readLine(); // Payload
+                  if (parts[i] == null) {
+                    broken = true;
+                    break;
+                  }
+                }
+                if (broken) break;
+              } else {
+                parts = line.split("\\s+");
               }
 
               String command = parts[0];
@@ -1229,6 +1324,10 @@ public class Main {
           } finally {
             if (out != null) {
               replicas.remove(out);
+              replicaAcks.remove(out);
+              synchronized (waitLock) {
+                waitLock.notifyAll();
+              }
             }
             unwatchAll(clientCtx);
             try {
