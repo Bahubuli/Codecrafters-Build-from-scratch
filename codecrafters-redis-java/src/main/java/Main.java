@@ -907,8 +907,14 @@ public class Main {
         sb.append("*").append(count).append("\r\n");
         for (int i = 2; i < parts.length; i++) {
           String member = parts[i];
-          if (zset != null && zset.getScore(member) != null) {
-            sb.append("*2\r\n$1\r\n0\r\n$1\r\n0\r\n");
+          Double score = (zset != null) ? zset.getScore(member) : null;
+          if (score != null) {
+            double[] coords = decodeGeo((long) score.doubleValue());
+            String lonStr = java.math.BigDecimal.valueOf(coords[0]).toPlainString();
+            String latStr = java.math.BigDecimal.valueOf(coords[1]).toPlainString();
+            sb.append("*2\r\n");
+            sb.append("$").append(lonStr.getBytes(StandardCharsets.UTF_8).length).append("\r\n").append(lonStr).append("\r\n");
+            sb.append("$").append(latStr.getBytes(StandardCharsets.UTF_8).length).append("\r\n").append(latStr).append("\r\n");
           } else {
             sb.append("*-1\r\n");
           }
