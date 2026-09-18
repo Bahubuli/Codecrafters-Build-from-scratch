@@ -595,6 +595,19 @@ public class Main {
                             }
                         }
                     } catch (IOException ignored) {}
+                } else if (cmdArgs.size() >= 3 && cmdArgs.get(1).equals("-w")) {
+                    String filePath = cmdArgs.get(2);
+                    try {
+                        Path p = currentDir.resolve(filePath).normalize();
+                        if (p.getParent() != null) {
+                            Files.createDirectories(p.getParent());
+                        }
+                        StringBuilder sb = new StringBuilder();
+                        for (String hCmd : commandHistory) {
+                            sb.append(hCmd).append("\n");
+                        }
+                        Files.writeString(p, sb.toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+                    } catch (IOException ignored) {}
                 } else {
                     int limit = commandHistory.size();
                     if (cmdArgs.size() > 1) {
