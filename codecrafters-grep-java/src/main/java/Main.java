@@ -33,8 +33,8 @@ public class Main {
         while (scanner.hasNextLine()) {
             String line = scanner.nextLine();
             if (onlyMatching) {
-                String match = findFirstMatch(line, pattern);
-                if (match != null) {
+                List<String> matches = findAllMatches(line, pattern);
+                for (String match : matches) {
                     System.out.println(match);
                     matchedAny = true;
                 }
@@ -271,6 +271,12 @@ public class Main {
     }
 
     public static String findFirstMatch(String inputLine, String pattern) {
+        List<String> matches = findAllMatches(inputLine, pattern);
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    public static List<String> findAllMatches(String inputLine, String pattern) {
+        List<String> results = new ArrayList<>();
         boolean anchorStart = false;
         boolean anchorEnd = false;
         String activePattern = pattern;
@@ -289,26 +295,45 @@ public class Main {
 
         if (nodes.isEmpty()) {
             if (anchorEnd && !inputLine.isEmpty()) {
-                return null;
+                return results;
             }
-            return "";
+            if (anchorStart) {
+                results.add("");
+                return results;
+            }
+            for (int i = 0; i <= inputLine.length(); i++) {
+                results.add("");
+            }
+            return results;
         }
 
         if (anchorStart) {
             int end = matchEndNodesAt(inputLine, 0, nodes, 0, anchorEnd, new HashMap<>());
             if (end != -1) {
-                return inputLine.substring(0, end);
+                results.add(inputLine.substring(0, end));
             }
-            return null;
+            return results;
         }
 
-        for (int start = 0; start <= inputLine.length(); start++) {
+        int start = 0;
+        while (start <= inputLine.length()) {
             int end = matchEndNodesAt(inputLine, start, nodes, 0, anchorEnd, new HashMap<>());
             if (end != -1) {
-                return inputLine.substring(start, end);
+                results.add(inputLine.substring(start, end));
+                if (anchorEnd) {
+                    break;
+                }
+                if (end > start) {
+                    start = end;
+                } else {
+                    start = start + 1;
+                }
+            } else {
+                start++;
             }
         }
-        return null;
+
+        return results;
     }
 
     private static int matchEndNodesAt(
