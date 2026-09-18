@@ -186,6 +186,9 @@ public class Main {
                             } else {
                                 err.println("complete: " + target + ": no completion specification");
                             }
+                        } else if (cmdArgs.size() >= 3 && cmdArgs.get(1).equals("-r")) {
+                            String target = cmdArgs.get(2);
+                            COMPLETION_SPECS.remove(target);
                         } else if (cmdArgs.size() >= 4 && cmdArgs.get(1).equals("-C")) {
                             String scriptPath = cmdArgs.get(2);
                             String target = cmdArgs.get(3);
