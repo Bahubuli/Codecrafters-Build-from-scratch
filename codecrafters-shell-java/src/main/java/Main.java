@@ -39,6 +39,14 @@ public class Main {
 
     private static final List<Job> backgroundJobs = new ArrayList<>();
 
+    static class ParsedCommand {
+        List<String> cmdArgs = new ArrayList<>();
+        String redirectOutFile = null;
+        String redirectErrFile = null;
+        boolean appendOut = false;
+        boolean appendErr = false;
+    }
+
     public static void main(String[] args) throws Exception {
         enableRawMode();
 
@@ -66,71 +74,43 @@ public class Main {
                 continue;
             }
 
-            // Scan for redirection operators (>>, 1>>, >, 1>, 2>>, 2>)
-            List<String> cmdArgs = new ArrayList<>();
-            String redirectOutFile = null;
-            String redirectErrFile = null;
-            boolean appendOut = false;
-            boolean appendErr = false;
-
-            for (int i = 0; i < parsedArgs.size(); i++) {
-                String arg = parsedArgs.get(i);
-                if ((arg.equals(">>") || arg.equals("1>>")) && i + 1 < parsedArgs.size()) {
-                    appendOut = true;
-                    redirectOutFile = parsedArgs.get(i + 1);
-                    prepareRedirectionFile(redirectOutFile, true);
-                    i++;
-                } else if (arg.equals("2>>") && i + 1 < parsedArgs.size()) {
-                    appendErr = true;
-                    redirectErrFile = parsedArgs.get(i + 1);
-                    prepareRedirectionFile(redirectErrFile, true);
-                    i++;
-                } else if (arg.startsWith(">>") && arg.length() > 2) {
-                    appendOut = true;
-                    redirectOutFile = arg.substring(2);
-                    prepareRedirectionFile(redirectOutFile, true);
-                } else if (arg.startsWith("1>>") && arg.length() > 3) {
-                    appendOut = true;
-                    redirectOutFile = arg.substring(3);
-                    prepareRedirectionFile(redirectOutFile, true);
-                } else if (arg.startsWith("2>>") && arg.length() > 3) {
-                    appendErr = true;
-                    redirectErrFile = arg.substring(3);
-                    prepareRedirectionFile(redirectErrFile, true);
-                } else if ((arg.equals(">") || arg.equals("1>")) && i + 1 < parsedArgs.size()) {
-                    appendOut = false;
-                    redirectOutFile = parsedArgs.get(i + 1);
-                    prepareRedirectionFile(redirectOutFile, false);
-                    i++;
-                } else if (arg.equals("2>") && i + 1 < parsedArgs.size()) {
-                    appendErr = false;
-                    redirectErrFile = parsedArgs.get(i + 1);
-                    prepareRedirectionFile(redirectErrFile, false);
-                    i++;
-                } else if (arg.startsWith(">") && !arg.startsWith(">>") && arg.length() > 1) {
-                    appendOut = false;
-                    redirectOutFile = arg.substring(1);
-                    prepareRedirectionFile(redirectOutFile, false);
-                } else if (arg.startsWith("1>") && !arg.startsWith("1>>") && arg.length() > 2) {
-                    appendOut = false;
-                    redirectOutFile = arg.substring(2);
-                    prepareRedirectionFile(redirectOutFile, false);
-                } else if (arg.startsWith("2>") && !arg.startsWith("2>>") && arg.length() > 2) {
-                    appendErr = false;
-                    redirectErrFile = arg.substring(2);
-                    prepareRedirectionFile(redirectErrFile, false);
+            // Split by pipeline operator "|"
+            List<List<String>> pipeCommands = new ArrayList<>();
+            List<String> currentCmd = new ArrayList<>();
+            for (String token : parsedArgs) {
+                if (token.equals("|")) {
+                    if (!currentCmd.isEmpty()) {
+                        pipeCommands.add(currentCmd);
+                        currentCmd = new ArrayList<>();
+                    }
                 } else {
-                    cmdArgs.add(arg);
+                    currentCmd.add(token);
                 }
             }
+            if (!currentCmd.isEmpty()) {
+                pipeCommands.add(currentCmd);
+            }
 
+            if (pipeCommands.isEmpty()) {
+                continue;
+            }
+
+            if (pipeCommands.size() > 1) {
+                executePipeline(pipeCommands);
+                continue;
+            }
+
+            ParsedCommand pc = parseRedirection(pipeCommands.get(0));
+            List<String> cmdArgs = pc.cmdArgs;
             if (cmdArgs.isEmpty()) {
                 continue;
             }
 
             String command = cmdArgs.get(0);
-            Path outPath = redirectOutFile != null ? resolvePath(redirectOutFile) : null;
-            Path errPath = redirectErrFile != null ? resolvePath(redirectErrFile) : null;
+            Path outPath = pc.redirectOutFile != null ? resolvePath(pc.redirectOutFile) : null;
+            Path errPath = pc.redirectErrFile != null ? resolvePath(pc.redirectErrFile) : null;
+            boolean appendOut = pc.appendOut;
+            boolean appendErr = pc.appendErr;
 
             if (BUILTINS.contains(command)) {
                 PrintStream out = System.out;
@@ -309,6 +289,133 @@ public class Main {
                 }
             }
         }
+    }
+
+    private static void executePipeline(List<List<String>> pipeCommands) {
+        List<ParsedCommand> parsedList = new ArrayList<>();
+        for (List<String> rawTokens : pipeCommands) {
+            try {
+                ParsedCommand pc = parseRedirection(rawTokens);
+                if (pc.cmdArgs.isEmpty()) {
+                    return;
+                }
+                parsedList.add(pc);
+            } catch (Exception e) {
+                return;
+            }
+        }
+
+        // Validate all commands exist
+        for (ParsedCommand pc : parsedList) {
+            String cmd = pc.cmdArgs.get(0);
+            if (findExecutable(cmd) == null && !BUILTINS.contains(cmd)) {
+                System.out.println(cmd + ": command not found");
+                return;
+            }
+        }
+
+        List<ProcessBuilder> builders = new ArrayList<>();
+        for (int i = 0; i < parsedList.size(); i++) {
+            ParsedCommand pc = parsedList.get(i);
+            ProcessBuilder pb = new ProcessBuilder(pc.cmdArgs);
+            pb.directory(currentDir.toFile());
+
+            // Stdin redirection
+            if (i == 0) {
+                pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+            }
+
+            // Stdout redirection
+            if (i == parsedList.size() - 1) {
+                if (pc.redirectOutFile != null) {
+                    Path outPath = resolvePath(pc.redirectOutFile);
+                    pb.redirectOutput(pc.appendOut ? ProcessBuilder.Redirect.appendTo(outPath.toFile()) : ProcessBuilder.Redirect.to(outPath.toFile()));
+                } else {
+                    pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                }
+            }
+
+            // Stderr redirection
+            if (pc.redirectErrFile != null) {
+                Path errPath = resolvePath(pc.redirectErrFile);
+                pb.redirectError(pc.appendErr ? ProcessBuilder.Redirect.appendTo(errPath.toFile()) : ProcessBuilder.Redirect.to(errPath.toFile()));
+            } else {
+                pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+            }
+
+            builders.add(pb);
+        }
+
+        setRawMode(false);
+        try {
+            List<Process> processes = ProcessBuilder.startPipeline(builders);
+            Process last = processes.get(processes.size() - 1);
+            last.waitFor();
+            for (Process p : processes) {
+                if (p.isAlive()) {
+                    p.destroy();
+                }
+                p.waitFor();
+            }
+        } catch (Exception ignored) {
+        } finally {
+            setRawMode(true);
+        }
+    }
+
+    private static ParsedCommand parseRedirection(List<String> tokens) throws Exception {
+        ParsedCommand pc = new ParsedCommand();
+        for (int i = 0; i < tokens.size(); i++) {
+            String arg = tokens.get(i);
+            if ((arg.equals(">>") || arg.equals("1>>")) && i + 1 < tokens.size()) {
+                pc.appendOut = true;
+                pc.redirectOutFile = tokens.get(i + 1);
+                prepareRedirectionFile(pc.redirectOutFile, true);
+                i++;
+            } else if (arg.equals("2>>") && i + 1 < tokens.size()) {
+                pc.appendErr = true;
+                pc.redirectErrFile = tokens.get(i + 1);
+                prepareRedirectionFile(pc.redirectErrFile, true);
+                i++;
+            } else if (arg.startsWith(">>") && arg.length() > 2) {
+                pc.appendOut = true;
+                pc.redirectOutFile = arg.substring(2);
+                prepareRedirectionFile(pc.redirectOutFile, true);
+            } else if (arg.startsWith("1>>") && arg.length() > 3) {
+                pc.appendOut = true;
+                pc.redirectOutFile = arg.substring(3);
+                prepareRedirectionFile(pc.redirectOutFile, true);
+            } else if (arg.startsWith("2>>") && arg.length() > 3) {
+                pc.appendErr = true;
+                pc.redirectErrFile = arg.substring(3);
+                prepareRedirectionFile(pc.redirectErrFile, true);
+            } else if ((arg.equals(">") || arg.equals("1>")) && i + 1 < tokens.size()) {
+                pc.appendOut = false;
+                pc.redirectOutFile = tokens.get(i + 1);
+                prepareRedirectionFile(pc.redirectOutFile, false);
+                i++;
+            } else if (arg.equals("2>") && i + 1 < tokens.size()) {
+                pc.appendErr = false;
+                pc.redirectErrFile = tokens.get(i + 1);
+                prepareRedirectionFile(pc.redirectErrFile, false);
+                i++;
+            } else if (arg.startsWith(">") && !arg.startsWith(">>") && arg.length() > 1) {
+                pc.appendOut = false;
+                pc.redirectOutFile = arg.substring(1);
+                prepareRedirectionFile(pc.redirectOutFile, false);
+            } else if (arg.startsWith("1>") && !arg.startsWith("1>>") && arg.length() > 2) {
+                pc.appendOut = false;
+                pc.redirectOutFile = arg.substring(2);
+                prepareRedirectionFile(pc.redirectOutFile, false);
+            } else if (arg.startsWith("2>") && !arg.startsWith("2>>") && arg.length() > 2) {
+                pc.appendErr = false;
+                pc.redirectErrFile = arg.substring(2);
+                prepareRedirectionFile(pc.redirectErrFile, false);
+            } else {
+                pc.cmdArgs.add(arg);
+            }
+        }
+        return pc;
     }
 
     private static void setRawMode(boolean raw) {
@@ -628,6 +735,18 @@ public class Main {
                 } else if (c == '\"') {
                     inDoubleQuote = true;
                     hasToken = true;
+                } else if (c == '|') {
+                    if (hasToken) {
+                        args.add(current.toString());
+                        current.setLength(0);
+                        hasToken = false;
+                    }
+                    if (i + 1 < input.length() && input.charAt(i + 1) == '|') {
+                        i++;
+                        args.add("||");
+                    } else {
+                        args.add("|");
+                    }
                 } else if (Character.isWhitespace(c)) {
                     if (hasToken) {
                         args.add(current.toString());
