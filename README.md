@@ -9,11 +9,12 @@ This monorepo tracks deep-dive implementations of real-world infrastructure syst
 | Project | Local Path | Language | Status | CodeCrafters Challenge |
 | :--- | :--- | :--- | :--- | :--- |
 | **Build Your Own Redis** | [`codecrafters-redis-java`](codecrafters-redis-java/) | Java 21 | **100% Completed** (123/123 Stages) | [Redis Challenge](https://app.codecrafters.io/courses/redis/overview) |
-| **Build Your Own HTTP Server** | [`codecrafters-http-server-java`](codecrafters-http-server-java/) | Java 21 | **In Progress** | [HTTP Server Challenge](https://app.codecrafters.io/courses/http-server/overview) |
+| **Build Your Own HTTP Server** | [`codecrafters-http-server-java`](codecrafters-http-server-java/) | Java 21 | **100% Completed** (14/14 Stages) | [HTTP Server Challenge](https://app.codecrafters.io/courses/http-server/overview) |
 | **Build Your Own Shell** | [`codecrafters-shell-java`](codecrafters-shell-java/) | Java 21 | Available | [Shell Challenge](https://app.codecrafters.io/courses/shell/overview) |
 | **Build Your Own Interpreter** | [`codecrafters-interpreter-java`](codecrafters-interpreter-java/) | Java 21 | **In Progress** | [Interpreter Challenge](https://app.codecrafters.io/courses/interpreter/overview) |
 | **Build Your Own Grep** | [`codecrafters-grep-java`](codecrafters-grep-java/) | Java 21 | **In Progress** | [Grep Challenge](https://app.codecrafters.io/courses/grep/overview) |
-| **Build Your Own BitTorrent** | [`codecrafters-bittorrent-java`](codecrafters-bittorrent-java/) | Java 25 | **In Progress** | [BitTorrent Challenge](https://app.codecrafters.io/courses/bittorrent/overview) |
+| **Build Your Own SQLite** | [`codecrafters-sqlite-java`](codecrafters-sqlite-java/) | Java 21 | Available | [SQLite Challenge](https://app.codecrafters.io/courses/sqlite/overview) |
+| **Build Your Own BitTorrent** | [`codecrafters-bittorrent-java`](codecrafters-bittorrent-java/) | Java 21 | Available | [BitTorrent Challenge](https://app.codecrafters.io/courses/bittorrent/overview) |
 
 ---
 
@@ -35,13 +36,24 @@ Full-featured, protocol-compliant in-memory key-value store and streaming engine
 ---
 
 ### 2. Build Your Own HTTP Server (`codecrafters-http-server-java`)
-Lightweight, RFC-compliant HTTP/1.1 web server built from TCP primitives:
-- TCP server socket binding and concurrent connection handling via thread pools.
-- HTTP request line, header, and body parsing.
-- URL routing, dynamic path parameter extraction, and status code generation (`200 OK`, `404 Not Found`, `201 Created`).
-- File serving and uploading (`/files/{filename}`).
-- Content negotiation and HTTP compression (`gzip` via `java.util.zip.GZIPOutputStream`).
-- Persistent connections (`Connection: keep-alive`).
+Production-grade, RFC-compliant HTTP/1.1 web server built from raw TCP sockets:
+- **Base HTTP Protocol & Networking**:
+  - TCP server socket binding with `SO_REUSEADDR` on port 4221.
+  - Multi-threaded asynchronous request dispatching via `ExecutorService` cached thread pools.
+  - Case-insensitive request header parsing, CRLF message boundaries, and body streaming using `Content-Length`.
+  - Dynamic routing and status code handling (`200 OK`, `201 Created`, `404 Not Found`).
+- **File Server & Static Assets**:
+  - Serving binary files via `/files/{filename}` with `application/octet-stream`.
+  - Storing uploaded binary payloads via `POST /files/{filename}` with directory creation.
+- **HTTP Compression Extension (RFC 1952)**:
+  - `Accept-Encoding` header negotiation supporting comma-separated tokenization with whitespace trimming.
+  - GZIP body compression via `java.util.zip.GZIPOutputStream` and raw binary octet streaming.
+  - Accurate `Content-Length` calculation on compressed byte streams.
+- **Persistent Connections Extension (HTTP/1.1 Keep-Alive)**:
+  - Keep-alive connection pooling over single TCP connections (`curl --http1.1 --next`).
+  - Concurrent persistent connections across independent client sockets.
+  - Graceful connection teardown via `Connection: close` header synchronization.
+- **Pedagogical Archive**: All 14 stages fully documented in [`codecrafters-http-server-java/Tasks/`](codecrafters-http-server-java/Tasks/) with 11-section pedagogical guides.
 
 ---
 
@@ -69,25 +81,14 @@ Full-featured tree-walk interpreter for the Lox programming language (Crafting I
 
 ### 5. Build Your Own Grep (`codecrafters-grep-java`)
 Recursive-descent / backtracking regular expression matcher and grep CLI from first principles:
-- **Literals & Character Classes**: Single characters, `\\d` (digits), `\\w` (word characters).
+- **Literals & Character Classes**: Single characters, `\d` (digits), `\w` (word characters).
 - **Character Groups**: Positive groups (`[abc]`), negative groups (`[^abc]`).
 - **Compound Patterns**: Combinations of literal characters and character classes.
 - **Anchors**: Line beginning (`^`) and line ending (`$`).
 - **Quantifiers**: One or more (`+`), zero or one (`?`), zero or more (`*`).
 - **Wildcard**: Any character (`.`).
 - **Alternation**: Disjunction of subpatterns (`(cat|dog)`).
-- **Backreferences**: Single and multiple capture groups with backreference matching (`\\1`, `\\2`).
-
----
-
-### 6. Build Your Own BitTorrent (`codecrafters-bittorrent-java`)
-Full-featured BitTorrent client conforming to BEP 0003, BEP 0009, and BEP 0010:
-- **Bencoding Engine**: Serializer and deserializer for strings, integers, lists, and ordered dictionaries.
-- **Metainfo & SHA-1 Verification**: `.torrent` metainfo extraction, binary piece hashing, info hash computation.
-- **Tracker Communication**: Compact binary peer discovery over HTTP/GET with URL-encoded 20-byte binary hashes.
-- **Peer Wire Protocol**: Handshakes, stateful message parsing (`choke`, `unchoke`, `interested`, `bitfield`, `request`, `piece`).
-- **Pipelined Block Downloader**: Asynchronous 16 KiB block scheduling, piece validation against SHA-1 hashes, disk persistence.
-- **Magnet Links & Extension Protocol**: BEP 9/BEP 10 metadata exchange over peer wire.
+- **Backreferences**: Single and multiple capture groups with backreference matching (`\1`, `\2`).
 
 ---
 
@@ -101,6 +102,7 @@ Full-featured BitTorrent client conforming to BEP 0003, BEP 0009, and BEP 0010:
   - `shell-codecrafters`: `https://git.codecrafters.io/d44f4c8a35fb46bd`
   - `interpreter-codecrafters`: `https://git.codecrafters.io/45148298d18ce52a`
   - `grep-codecrafters`: `https://git.codecrafters.io/6bc6999955a9e704`
+  - `sqlite-codecrafters`: `https://git.codecrafters.io/3834811af6483d8a`
   - `bittorrent-codecrafters`: `https://git.codecrafters.io/9565605bfc6d1920`
 
 CodeCrafters isolates tests per challenge repo. Submissions are synced seamlessly from the monorepo to the respective challenge remotes via dedicated scripts:
@@ -120,6 +122,9 @@ powershell -File scripts/push-interpreter.ps1 "Stage NN: <Title>"
 
 # Submit Grep changes
 powershell -File scripts/push-grep.ps1 "Stage NN: <Title>"
+
+# Submit SQLite changes
+powershell -File scripts/push-sqlite.ps1 "Stage NN: <Title>"
 
 # Submit BitTorrent changes
 powershell -File scripts/push-bittorrent.ps1 "Stage NN: <Title>"
