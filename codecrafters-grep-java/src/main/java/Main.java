@@ -193,7 +193,8 @@ public class Main {
     enum Quantifier {
         EXACTLY_ONE,
         ONE_OR_MORE,
-        ZERO_OR_ONE
+        ZERO_OR_ONE,
+        ZERO_OR_MORE
     }
 
     interface PatternNode {}
@@ -332,6 +333,9 @@ public class Main {
                 } else if (next == '?') {
                     pos++;
                     return Quantifier.ZERO_OR_ONE;
+                } else if (next == '*') {
+                    pos++;
+                    return Quantifier.ZERO_OR_MORE;
                 }
             }
             return Quantifier.EXACTLY_ONE;
@@ -464,6 +468,18 @@ public class Main {
                     }
                 }
                 return matchEndNodesAt(inputLine, textIdx, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+            } else if (tn.quantifier == Quantifier.ZERO_OR_MORE) {
+                int maxMatch = textIdx;
+                while (maxMatch < inputLine.length() && tn.token.matches(inputLine.charAt(maxMatch))) {
+                    maxMatch++;
+                }
+                for (int end = maxMatch; end >= textIdx; end--) {
+                    int res = matchEndNodesAt(inputLine, end, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+                    if (res != -1) {
+                        return res;
+                    }
+                }
+                return -1;
             }
         } else if (current instanceof GroupNode) {
             GroupNode gn = (GroupNode) current;
@@ -479,7 +495,7 @@ public class Main {
                     }
                 }
             }
-            if (gn.quantifier == Quantifier.ZERO_OR_ONE) {
+            if (gn.quantifier == Quantifier.ZERO_OR_ONE || gn.quantifier == Quantifier.ZERO_OR_MORE) {
                 return matchEndNodesAt(inputLine, textIdx, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
             }
             return -1;
@@ -533,6 +549,14 @@ public class Main {
                     findBranchMatches(inputLine, textIdx + 1, branchNodes, bIdx + 1, capturedGroups, endPositions);
                 }
                 findBranchMatches(inputLine, textIdx, branchNodes, bIdx + 1, capturedGroups, endPositions);
+            } else if (tn.quantifier == Quantifier.ZERO_OR_MORE) {
+                int maxMatch = textIdx;
+                while (maxMatch < inputLine.length() && tn.token.matches(inputLine.charAt(maxMatch))) {
+                    maxMatch++;
+                }
+                for (int end = maxMatch; end >= textIdx; end--) {
+                    findBranchMatches(inputLine, end, branchNodes, bIdx + 1, capturedGroups, endPositions);
+                }
             }
         } else if (current instanceof BackreferenceNode) {
             BackreferenceNode bn = (BackreferenceNode) current;
