@@ -14,6 +14,15 @@ public class Main {
         AUTO
     }
 
+    static class FileInput {
+        final String name;
+        final Scanner scanner;
+        FileInput(String name, Scanner scanner) {
+            this.name = name;
+            this.scanner = scanner;
+        }
+    }
+
     public static void main(String[] args) {
         boolean onlyMatching = false;
         ColorMode colorMode = ColorMode.NEVER;
@@ -66,14 +75,15 @@ public class Main {
         }
 
         boolean shouldColor = (colorMode == ColorMode.ALWAYS) || (colorMode == ColorMode.AUTO && isStdoutTty());
+        boolean printFilenamePrefix = filePaths.size() > 1;
 
-        List<Scanner> scanners = new ArrayList<>();
+        List<FileInput> inputs = new ArrayList<>();
         if (filePaths.isEmpty()) {
-            scanners.add(new Scanner(System.in));
+            inputs.add(new FileInput(null, new Scanner(System.in)));
         } else {
             for (String path : filePaths) {
                 try {
-                    scanners.add(new Scanner(new java.io.File(path)));
+                    inputs.add(new FileInput(path, new Scanner(new java.io.File(path))));
                 } catch (IOException e) {
                     System.err.println("grep: " + path + ": No such file or directory");
                 }
@@ -82,38 +92,41 @@ public class Main {
 
         boolean matchedAny = false;
 
-        for (Scanner scanner : scanners) {
+        for (FileInput input : inputs) {
+            String prefix = (printFilenamePrefix && input.name != null) ? input.name + ":" : "";
+            Scanner scanner = input.scanner;
             while (scanner.hasNextLine()) {
-            String line = scanner.nextLine();
-            if (onlyMatching) {
-                List<String> matches = findAllMatches(line, pattern);
-                for (String match : matches) {
-                    System.out.println(match);
-                    matchedAny = true;
-                }
-            } else if (shouldColor) {
-                List<int[]> spans = findMatchSpans(line, pattern);
-                if (!spans.isEmpty()) {
-                    StringBuilder sb = new StringBuilder();
-                    int lastIdx = 0;
-                    for (int[] span : spans) {
-                        sb.append(line, lastIdx, span[0]);
-                        sb.append("\033[01;31m");
-                        sb.append(line, span[0], span[1]);
-                        sb.append("\033[m");
-                        lastIdx = span[1];
+                String line = scanner.nextLine();
+                if (onlyMatching) {
+                    List<String> matches = findAllMatches(line, pattern);
+                    for (String match : matches) {
+                        System.out.println(prefix + match);
+                        matchedAny = true;
                     }
-                    sb.append(line.substring(lastIdx));
-                    System.out.println(sb.toString());
-                    matchedAny = true;
-                }
-            } else {
-                if (matchPattern(line, pattern)) {
-                    System.out.println(line);
-                    matchedAny = true;
+                } else if (shouldColor) {
+                    List<int[]> spans = findMatchSpans(line, pattern);
+                    if (!spans.isEmpty()) {
+                        StringBuilder sb = new StringBuilder();
+                        sb.append(prefix);
+                        int lastIdx = 0;
+                        for (int[] span : spans) {
+                            sb.append(line, lastIdx, span[0]);
+                            sb.append("\033[01;31m");
+                            sb.append(line, span[0], span[1]);
+                            sb.append("\033[m");
+                            lastIdx = span[1];
+                        }
+                        sb.append(line.substring(lastIdx));
+                        System.out.println(sb.toString());
+                        matchedAny = true;
+                    }
+                } else {
+                    if (matchPattern(line, pattern)) {
+                        System.out.println(prefix + line);
+                        matchedAny = true;
+                    }
                 }
             }
-        }
             scanner.close();
         }
 
