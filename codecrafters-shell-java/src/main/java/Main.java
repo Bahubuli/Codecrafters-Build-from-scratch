@@ -110,7 +110,16 @@ public class Main {
                     current.append(c);
                 }
             } else {
-                if (c == '\'') {
+                if (c == '\\') {
+                    if (i + 1 < input.length()) {
+                        i++;
+                        current.append(input.charAt(i));
+                        hasToken = true;
+                    } else {
+                        current.append(c);
+                        hasToken = true;
+                    }
+                } else if (c == '\'') {
                     inSingleQuote = true;
                     hasToken = true;
                 } else if (c == '"') {
