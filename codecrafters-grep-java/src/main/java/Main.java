@@ -1,5 +1,7 @@
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Scanner;
 import java.util.Set;
 
@@ -78,28 +80,80 @@ public class Main {
         }
     }
 
+    static List<Token> parseTokens(String pattern) {
+        List<Token> tokens = new ArrayList<>();
+        int i = 0;
+        while (i < pattern.length()) {
+            char c = pattern.charAt(i);
+            if (c == '\\') {
+                if (i + 1 < pattern.length()) {
+                    char next = pattern.charAt(i + 1);
+                    if (next == 'd') {
+                        tokens.add(new DigitToken());
+                        i += 2;
+                    } else if (next == 'w') {
+                        tokens.add(new WordToken());
+                        i += 2;
+                    } else if (next == '\\') {
+                        tokens.add(new LiteralToken('\\'));
+                        i += 2;
+                    } else {
+                        tokens.add(new LiteralToken(next));
+                        i += 2;
+                    }
+                } else {
+                    tokens.add(new LiteralToken('\\'));
+                    i++;
+                }
+            } else if (c == '[') {
+                int closing = pattern.indexOf(']', i + 1);
+                if (closing != -1) {
+                    if (i + 1 < pattern.length() && pattern.charAt(i + 1) == '^') {
+                        String groupChars = pattern.substring(i + 2, closing);
+                        tokens.add(new NegativeGroupToken(groupChars));
+                    } else {
+                        String groupChars = pattern.substring(i + 1, closing);
+                        tokens.add(new PositiveGroupToken(groupChars));
+                    }
+                    i = closing + 1;
+                } else {
+                    tokens.add(new LiteralToken(c));
+                    i++;
+                }
+            } else {
+                tokens.add(new LiteralToken(c));
+                i++;
+            }
+        }
+        return tokens;
+    }
+
     public static boolean matchPattern(String inputLine, String pattern) {
-        Token token;
-        if (pattern.equals("\\d")) {
-            token = new DigitToken();
-        } else if (pattern.equals("\\w")) {
-            token = new WordToken();
-        } else if (pattern.startsWith("[^") && pattern.endsWith("]")) {
-            String chars = pattern.substring(2, pattern.length() - 1);
-            token = new NegativeGroupToken(chars);
-        } else if (pattern.startsWith("[") && pattern.endsWith("]")) {
-            String chars = pattern.substring(1, pattern.length() - 1);
-            token = new PositiveGroupToken(chars);
-        } else if (pattern.length() == 1) {
-            token = new LiteralToken(pattern.charAt(0));
-        } else {
-            throw new RuntimeException("Unhandled pattern: " + pattern);
+        List<Token> tokens = parseTokens(pattern);
+
+        if (tokens.isEmpty()) {
+            return true;
         }
 
-        for (int i = 0; i < inputLine.length(); i++) {
-            if (token.matches(inputLine.charAt(i))) {
+        for (int start = 0; start <= inputLine.length(); start++) {
+            if (matchesAt(inputLine, start, tokens, 0)) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    private static boolean matchesAt(String inputLine, int textIdx, List<Token> tokens, int tokenIdx) {
+        if (tokenIdx == tokens.size()) {
+            return true;
+        }
+        if (textIdx == inputLine.length()) {
+            return false;
+        }
+
+        Token currentToken = tokens.get(tokenIdx);
+        if (currentToken.matches(inputLine.charAt(textIdx))) {
+            return matchesAt(inputLine, textIdx + 1, tokens, tokenIdx + 1);
         }
         return false;
     }
