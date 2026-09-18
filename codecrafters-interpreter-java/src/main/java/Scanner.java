@@ -30,6 +30,12 @@ public class Scanner {
     private void scanToken() {
         char c = advance();
         switch (c) {
+            case '(':
+                addToken(TokenType.LEFT_PAREN);
+                break;
+            case ')':
+                addToken(TokenType.RIGHT_PAREN);
+                break;
             case ' ':
             case '\r':
             case '\t':
