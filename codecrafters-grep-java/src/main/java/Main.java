@@ -18,6 +18,7 @@ public class Main {
         boolean onlyMatching = false;
         ColorMode colorMode = ColorMode.NEVER;
         String pattern = null;
+        List<String> filePaths = new ArrayList<>();
 
         for (int i = 0; i < args.length; i++) {
             if (args[i].equals("-o") || args[i].equals("--only-matching")) {
@@ -54,20 +55,35 @@ public class Main {
                 if (i + 1 < args.length) {
                     pattern = args[++i];
                 }
+            } else if (!args[i].startsWith("-")) {
+                filePaths.add(args[i]);
             }
         }
 
         if (pattern == null) {
-            System.out.println("Usage: ./your_program.sh [--color=always|auto|never] [-o] -E <pattern>");
+            System.out.println("Usage: ./your_program.sh [--color=always|auto|never] [-o] -E <pattern> [files...]");
             System.exit(1);
         }
 
         boolean shouldColor = (colorMode == ColorMode.ALWAYS) || (colorMode == ColorMode.AUTO && isStdoutTty());
 
-        Scanner scanner = new Scanner(System.in);
+        List<Scanner> scanners = new ArrayList<>();
+        if (filePaths.isEmpty()) {
+            scanners.add(new Scanner(System.in));
+        } else {
+            for (String path : filePaths) {
+                try {
+                    scanners.add(new Scanner(new java.io.File(path)));
+                } catch (IOException e) {
+                    System.err.println("grep: " + path + ": No such file or directory");
+                }
+            }
+        }
+
         boolean matchedAny = false;
 
-        while (scanner.hasNextLine()) {
+        for (Scanner scanner : scanners) {
+            while (scanner.hasNextLine()) {
             String line = scanner.nextLine();
             if (onlyMatching) {
                 List<String> matches = findAllMatches(line, pattern);
@@ -97,6 +113,8 @@ public class Main {
                     matchedAny = true;
                 }
             }
+        }
+            scanner.close();
         }
 
         if (matchedAny) {
