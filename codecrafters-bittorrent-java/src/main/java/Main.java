@@ -49,6 +49,20 @@ public class Main {
     String displayName;
   }
 
+  static class TorrentMetadata {
+    final long totalLength;
+    final long pieceLength;
+    final byte[] pieces;
+    final byte[] rawInfoBytes;
+
+    TorrentMetadata(long totalLength, long pieceLength, byte[] pieces, byte[] rawInfoBytes) {
+      this.totalLength = totalLength;
+      this.pieceLength = pieceLength;
+      this.pieces = pieces;
+      this.rawInfoBytes = rawInfoBytes;
+    }
+  }
+
   public static void main(String[] args) throws Exception {
     if (args.length < 2) {
       System.err.println("Usage: your_program.sh <command> <args>");
@@ -273,14 +287,7 @@ public class Main {
         throw new RuntimeException("No peers discovered from tracker");
       }
 
-      byte[] handshake = new byte[68];
-      handshake[0] = 19;
-      byte[] protocolBytes = "BitTorrent protocol".getBytes(StandardCharsets.ISO_8859_1);
-      System.arraycopy(protocolBytes, 0, handshake, 1, 19);
-      handshake[25] = 0x10;
-      System.arraycopy(infoHashBytes, 0, handshake, 28, 20);
-      byte[] myPeerId = generatePeerId();
-      System.arraycopy(myPeerId, 0, handshake, 48, 20);
+      byte[] handshake = createExtensionHandshake(infoHashBytes);
 
       boolean connected = false;
       for (Peer peer : peers) {
@@ -298,89 +305,22 @@ public class Main {
           }
 
           boolean peerSupportsExtensions = (response[25] & 0x10) != 0;
-          // First message might be bitfield (id=5) or extension handshake directly (id=20)
-          // Receive bitfield message if sent
           PeerMessage msg = readMessage(in);
 
-          if (peerSupportsExtensions) {
-            byte[] bencodedDict = "d1:md11:ut_metadatai16eee".getBytes(StandardCharsets.UTF_8);
-            int extPayloadLen = 1 + bencodedDict.length;
-            ByteBuffer extMsg = ByteBuffer.allocate(4 + 1 + extPayloadLen);
-            extMsg.putInt(1 + extPayloadLen);
-            extMsg.put((byte) 20);
-            extMsg.put((byte) 0);
-            extMsg.put(bencodedDict);
-
-            out.write(extMsg.array());
-            out.flush();
-
-            PeerMessage extResp = readMessage(in);
-            if (extResp.id == 20 && extResp.payload.length > 1 && extResp.payload[0] == 0) {
-              byte[] dictBytes = Arrays.copyOfRange(extResp.payload, 1, extResp.payload.length);
-              ByteBencodeParser extParser = new ByteBencodeParser(dictBytes);
-              @SuppressWarnings("unchecked")
-              Map<String, Object> extDict = (Map<String, Object>) extParser.parse();
-              @SuppressWarnings("unchecked")
-              Map<String, Object> mDict = (Map<String, Object>) extDict.get("m");
-              if (mDict != null && mDict.containsKey("ut_metadata")) {
-                long peerUtMetadataId = (Long) mDict.get("ut_metadata");
-
-                // Send metadata request: msg_type=0, piece=0
-                byte[] reqDict = "d8:msg_typei0e5:piecei0ee".getBytes(StandardCharsets.UTF_8);
-                ByteBuffer metaReqMsg = ByteBuffer.allocate(4 + 1 + 1 + reqDict.length);
-                metaReqMsg.putInt(1 + 1 + reqDict.length);
-                metaReqMsg.put((byte) 20);
-                metaReqMsg.put((byte) peerUtMetadataId);
-                metaReqMsg.put(reqDict);
-
-                out.write(metaReqMsg.array());
-                out.flush();
-
-                // Receive metadata data message
-                PeerMessage dataResp = null;
-                while (true) {
-                  PeerMessage pre = readMessage(in);
-                  if (pre.id == 20) {
-                    dataResp = pre;
-                    break;
-                  }
-                }
-
-                if (dataResp != null && dataResp.payload.length > 1) {
-                  byte[] dataPayload = Arrays.copyOfRange(dataResp.payload, 1, dataResp.payload.length);
-                  ByteBencodeParser dataParser = new ByteBencodeParser(dataPayload);
-                  @SuppressWarnings("unchecked")
-                  Map<String, Object> headerDict = (Map<String, Object>) dataParser.parse();
-
-                  int infoStart = dataParser.getIndex();
-                  byte[] infoBytes = Arrays.copyOfRange(dataPayload, infoStart, dataPayload.length);
-
-                  ByteBencodeParser infoParser = new ByteBencodeParser(infoBytes);
-                  @SuppressWarnings("unchecked")
-                  Map<String, Object> info = (Map<String, Object>) infoParser.parse();
-
-                  long totalLength = (long) (info.get("length") != null ? (Long) info.get("length") : 0L);
-                  long pieceLength = (Long) info.get("piece length");
-                  byte[] pieces = (byte[]) info.get("pieces");
-
-                  System.out.println("Tracker URL: " + parsed.trackerUrl);
-                  System.out.println("Length: " + totalLength);
-                  System.out.println("Info Hash: " + parsed.infoHash);
-                  System.out.println("Piece Length: " + pieceLength);
-                  System.out.println("Piece Hashes:");
-                  for (int i = 0; i < pieces.length; i += 20) {
-                    byte[] pieceHash = Arrays.copyOfRange(pieces, i, i + 20);
-                    System.out.println(bytesToHex(pieceHash));
-                  }
-
-                  connected = true;
-                  break;
-                }
-              }
+          TorrentMetadata meta = fetchMetadataFromSocket(out, in, peerSupportsExtensions, msg);
+          if (meta != null) {
+            System.out.println("Tracker URL: " + parsed.trackerUrl);
+            System.out.println("Length: " + meta.totalLength);
+            System.out.println("Info Hash: " + parsed.infoHash);
+            System.out.println("Piece Length: " + meta.pieceLength);
+            System.out.println("Piece Hashes:");
+            for (int i = 0; i < meta.pieces.length; i += 20) {
+              byte[] pieceHash = Arrays.copyOfRange(meta.pieces, i, i + 20);
+              System.out.println(bytesToHex(pieceHash));
             }
+            connected = true;
+            break;
           }
-
-          if (connected) break;
         } catch (Exception e) {
           // Try next peer
         }
@@ -398,15 +338,7 @@ public class Main {
         throw new RuntimeException("No peers discovered from tracker");
       }
 
-      byte[] handshake = new byte[68];
-      handshake[0] = 19;
-      byte[] protocolBytes = "BitTorrent protocol".getBytes(StandardCharsets.ISO_8859_1);
-      System.arraycopy(protocolBytes, 0, handshake, 1, 19);
-      // 8 reserved bytes: set 20th bit from right (reserved[5] = 0x10 -> index 25)
-      handshake[25] = 0x10;
-      System.arraycopy(infoHashBytes, 0, handshake, 28, 20);
-      byte[] myPeerId = generatePeerId();
-      System.arraycopy(myPeerId, 0, handshake, 48, 20);
+      byte[] handshake = createExtensionHandshake(infoHashBytes);
 
       boolean connected = false;
       for (Peer peer : peers) {
@@ -425,30 +357,35 @@ public class Main {
           byte[] peerId = Arrays.copyOfRange(response, 48, 68);
           System.out.println("Peer ID: " + bytesToHex(peerId));
 
-          // Check if peer supports extensions (bit 20 from right -> byte index 25, mask 0x10)
           boolean peerSupportsExtensions = (response[25] & 0x10) != 0;
-
-          // Receive bitfield message if sent
           PeerMessage msg = readMessage(in);
 
           if (peerSupportsExtensions) {
-            // Send extension handshake message:
-            // Message ID: 20 (extension)
-            // Payload: extension message ID: 0 (handshake), followed by bencoded dict: d1:md11:ut_metadatai16eee
             byte[] bencodedDict = "d1:md11:ut_metadatai16eee".getBytes(StandardCharsets.UTF_8);
             int extPayloadLen = 1 + bencodedDict.length;
             ByteBuffer extMsg = ByteBuffer.allocate(4 + 1 + extPayloadLen);
-            extMsg.putInt(1 + extPayloadLen); // length prefix = 1 (msg id) + extPayloadLen
-            extMsg.put((byte) 20); // message id = 20
-            extMsg.put((byte) 0); // extension message id = 0 (handshake)
+            extMsg.putInt(1 + extPayloadLen);
+            extMsg.put((byte) 20);
+            extMsg.put((byte) 0);
             extMsg.put(bencodedDict);
 
             out.write(extMsg.array());
             out.flush();
 
-            // Receive extension handshake message
-            PeerMessage extResp = readMessage(in);
-            if (extResp.id == 20 && extResp.payload.length > 1 && extResp.payload[0] == 0) {
+            PeerMessage extResp = null;
+            if (msg.id == 20 && msg.payload.length > 1 && msg.payload[0] == 0) {
+              extResp = msg;
+            } else {
+              while (true) {
+                PeerMessage m = readMessage(in);
+                if (m.id == 20 && m.payload.length > 1 && m.payload[0] == 0) {
+                  extResp = m;
+                  break;
+                }
+              }
+            }
+
+            if (extResp != null) {
               byte[] dictBytes = Arrays.copyOfRange(extResp.payload, 1, extResp.payload.length);
               ByteBencodeParser extParser = new ByteBencodeParser(dictBytes);
               @SuppressWarnings("unchecked")
@@ -470,6 +407,188 @@ public class Main {
       }
       if (!connected) {
         throw new RuntimeException("Failed to connect and handshake with any peer");
+      }
+    } else if ("magnet_download_piece".equals(command)) {
+      String outputPath = null;
+      String magnetLink = null;
+      int pieceIndex = -1;
+      for (int i = 1; i < args.length; i++) {
+        if ("-o".equals(args[i]) && i + 1 < args.length) {
+          outputPath = args[++i];
+        } else if (magnetLink == null) {
+          magnetLink = args[i];
+        } else {
+          pieceIndex = Integer.parseInt(args[i]);
+        }
+      }
+
+      MagnetLink parsed = parseMagnetLink(magnetLink);
+      byte[] infoHashBytes = hexToBytes(parsed.infoHash);
+
+      List<Peer> peers = getPeers(parsed.trackerUrl, infoHashBytes, 999);
+      if (peers.isEmpty()) {
+        throw new RuntimeException("No peers discovered from tracker");
+      }
+
+      byte[] handshake = createExtensionHandshake(infoHashBytes);
+
+      byte[] pieceData = null;
+      for (Peer peer : peers) {
+        try (Socket socket = new Socket(peer.ip, peer.port)) {
+          socket.setSoTimeout(15000);
+          OutputStream out = socket.getOutputStream();
+          InputStream in = socket.getInputStream();
+
+          out.write(handshake);
+          out.flush();
+
+          byte[] response = in.readNBytes(68);
+          if (response.length < 68) {
+            continue;
+          }
+
+          boolean peerSupportsExtensions = (response[25] & 0x10) != 0;
+          PeerMessage firstMsg = readMessage(in);
+
+          TorrentMetadata meta = fetchMetadataFromSocket(out, in, peerSupportsExtensions, firstMsg);
+          if (meta == null) {
+            continue;
+          }
+
+          int totalPieces = (int) Math.ceil((double) meta.totalLength / meta.pieceLength);
+          int pieceSize = (pieceIndex == totalPieces - 1)
+              ? (int) (meta.totalLength - (long) pieceIndex * meta.pieceLength)
+              : (int) meta.pieceLength;
+
+          // Send interested
+          byte[] interestedMsg = new byte[] { 0, 0, 0, 1, 2 };
+          out.write(interestedMsg);
+          out.flush();
+
+          // Wait for unchoke
+          while (true) {
+            PeerMessage m = readMessage(in);
+            if (m.id == 1) {
+              break;
+            }
+          }
+
+          pieceData = downloadPieceOnSocket(out, in, pieceIndex, pieceSize);
+
+          // Verify SHA-1 hash of the piece
+          byte[] expectedPieceHash = Arrays.copyOfRange(meta.pieces, pieceIndex * 20, (pieceIndex + 1) * 20);
+          byte[] actualPieceHash = MessageDigest.getInstance("SHA-1").digest(pieceData);
+          if (!Arrays.equals(expectedPieceHash, actualPieceHash)) {
+            throw new RuntimeException("Piece SHA-1 hash mismatch!");
+          }
+
+          Path outPath = Path.of(outputPath);
+          if (outPath.getParent() != null) {
+            Files.createDirectories(outPath.getParent());
+          }
+          Files.write(outPath, pieceData);
+          System.out.println("Piece " + pieceIndex + " downloaded to " + outputPath + ".");
+          break;
+        } catch (Exception e) {
+          // Try next peer
+        }
+      }
+
+      if (pieceData == null) {
+        throw new RuntimeException("Failed to download piece via magnet link from any peer");
+      }
+    } else if ("magnet_download".equals(command)) {
+      String outputPath = null;
+      String magnetLink = null;
+      for (int i = 1; i < args.length; i++) {
+        if ("-o".equals(args[i]) && i + 1 < args.length) {
+          outputPath = args[++i];
+        } else if (magnetLink == null) {
+          magnetLink = args[i];
+        }
+      }
+
+      MagnetLink parsed = parseMagnetLink(magnetLink);
+      byte[] infoHashBytes = hexToBytes(parsed.infoHash);
+
+      List<Peer> peers = getPeers(parsed.trackerUrl, infoHashBytes, 999);
+      if (peers.isEmpty()) {
+        throw new RuntimeException("No peers discovered from tracker");
+      }
+
+      byte[] handshake = createExtensionHandshake(infoHashBytes);
+
+      byte[] fullFile = null;
+      for (Peer peer : peers) {
+        try (Socket socket = new Socket(peer.ip, peer.port)) {
+          socket.setSoTimeout(25000);
+          OutputStream out = socket.getOutputStream();
+          InputStream in = socket.getInputStream();
+
+          out.write(handshake);
+          out.flush();
+
+          byte[] response = in.readNBytes(68);
+          if (response.length < 68) {
+            continue;
+          }
+
+          boolean peerSupportsExtensions = (response[25] & 0x10) != 0;
+          PeerMessage firstMsg = readMessage(in);
+
+          TorrentMetadata meta = fetchMetadataFromSocket(out, in, peerSupportsExtensions, firstMsg);
+          if (meta == null) {
+            continue;
+          }
+
+          // Send interested
+          byte[] interestedMsg = new byte[] { 0, 0, 0, 1, 2 };
+          out.write(interestedMsg);
+          out.flush();
+
+          // Wait for unchoke
+          while (true) {
+            PeerMessage m = readMessage(in);
+            if (m.id == 1) {
+              break;
+            }
+          }
+
+          int totalPieces = (int) Math.ceil((double) meta.totalLength / meta.pieceLength);
+          fullFile = new byte[(int) meta.totalLength];
+          boolean success = true;
+
+          for (int pieceIndex = 0; pieceIndex < totalPieces; pieceIndex++) {
+            int pieceSize = (pieceIndex == totalPieces - 1)
+                ? (int) (meta.totalLength - (long) pieceIndex * meta.pieceLength)
+                : (int) meta.pieceLength;
+            byte[] expectedPieceHash = Arrays.copyOfRange(meta.pieces, pieceIndex * 20, (pieceIndex + 1) * 20);
+
+            byte[] pieceData = downloadPieceOnSocket(out, in, pieceIndex, pieceSize);
+            byte[] actualHash = MessageDigest.getInstance("SHA-1").digest(pieceData);
+            if (!Arrays.equals(expectedPieceHash, actualHash)) {
+              success = false;
+              break;
+            }
+            System.arraycopy(pieceData, 0, fullFile, (int) (pieceIndex * meta.pieceLength), pieceSize);
+          }
+
+          if (success) {
+            Path outPath = Path.of(outputPath);
+            if (outPath.getParent() != null) {
+              Files.createDirectories(outPath.getParent());
+            }
+            Files.write(outPath, fullFile);
+            System.out.println("Downloaded " + magnetLink + " to " + outputPath + ".");
+            break;
+          }
+        } catch (Exception e) {
+          // Try next peer
+        }
+      }
+
+      if (fullFile == null) {
+        throw new RuntimeException("Failed to download file via magnet link from any peer");
       }
     } else {
       System.out.println("Unknown command: " + command);
@@ -517,6 +636,101 @@ public class Main {
     long time = System.currentTimeMillis();
     String s = String.format("-PC0001-%012d", time % 1000000000000L);
     return s.getBytes(StandardCharsets.ISO_8859_1);
+  }
+
+  static byte[] createExtensionHandshake(byte[] infoHashBytes) {
+    byte[] handshake = new byte[68];
+    handshake[0] = 19;
+    byte[] protocolBytes = "BitTorrent protocol".getBytes(StandardCharsets.ISO_8859_1);
+    System.arraycopy(protocolBytes, 0, handshake, 1, 19);
+    handshake[25] = 0x10;
+    System.arraycopy(infoHashBytes, 0, handshake, 28, 20);
+    byte[] myPeerId = generatePeerId();
+    System.arraycopy(myPeerId, 0, handshake, 48, 20);
+    return handshake;
+  }
+
+  static TorrentMetadata fetchMetadataFromSocket(OutputStream out, InputStream in, boolean peerSupportsExtensions, PeerMessage preReadMsg) throws Exception {
+    if (!peerSupportsExtensions) {
+      return null;
+    }
+    byte[] bencodedDict = "d1:md11:ut_metadatai16eee".getBytes(StandardCharsets.UTF_8);
+    int extPayloadLen = 1 + bencodedDict.length;
+    ByteBuffer extMsg = ByteBuffer.allocate(4 + 1 + extPayloadLen);
+    extMsg.putInt(1 + extPayloadLen);
+    extMsg.put((byte) 20);
+    extMsg.put((byte) 0);
+    extMsg.put(bencodedDict);
+
+    out.write(extMsg.array());
+    out.flush();
+
+    PeerMessage extResp = null;
+    if (preReadMsg != null && preReadMsg.id == 20 && preReadMsg.payload.length > 1 && preReadMsg.payload[0] == 0) {
+      extResp = preReadMsg;
+    } else {
+      while (true) {
+        PeerMessage m = readMessage(in);
+        if (m.id == 20 && m.payload.length > 1 && m.payload[0] == 0) {
+          extResp = m;
+          break;
+        }
+      }
+    }
+
+    byte[] dictBytes = Arrays.copyOfRange(extResp.payload, 1, extResp.payload.length);
+    ByteBencodeParser extParser = new ByteBencodeParser(dictBytes);
+    @SuppressWarnings("unchecked")
+    Map<String, Object> extDict = (Map<String, Object>) extParser.parse();
+    @SuppressWarnings("unchecked")
+    Map<String, Object> mDict = (Map<String, Object>) extDict.get("m");
+    if (mDict == null || !mDict.containsKey("ut_metadata")) {
+      return null;
+    }
+    long peerUtMetadataId = (Long) mDict.get("ut_metadata");
+
+    // Send metadata request: msg_type=0, piece=0
+    byte[] reqDict = "d8:msg_typei0e5:piecei0ee".getBytes(StandardCharsets.UTF_8);
+    ByteBuffer metaReqMsg = ByteBuffer.allocate(4 + 1 + 1 + reqDict.length);
+    metaReqMsg.putInt(1 + 1 + reqDict.length);
+    metaReqMsg.put((byte) 20);
+    metaReqMsg.put((byte) peerUtMetadataId);
+    metaReqMsg.put(reqDict);
+
+    out.write(metaReqMsg.array());
+    out.flush();
+
+    // Receive metadata data message
+    PeerMessage dataResp = null;
+    while (true) {
+      PeerMessage pre = readMessage(in);
+      if (pre.id == 20) {
+        dataResp = pre;
+        break;
+      }
+    }
+
+    if (dataResp == null || dataResp.payload.length <= 1) {
+      return null;
+    }
+
+    byte[] dataPayload = Arrays.copyOfRange(dataResp.payload, 1, dataResp.payload.length);
+    ByteBencodeParser dataParser = new ByteBencodeParser(dataPayload);
+    @SuppressWarnings("unchecked")
+    Map<String, Object> headerDict = (Map<String, Object>) dataParser.parse();
+
+    int infoStart = dataParser.getIndex();
+    byte[] infoBytes = Arrays.copyOfRange(dataPayload, infoStart, dataPayload.length);
+
+    ByteBencodeParser infoParser = new ByteBencodeParser(infoBytes);
+    @SuppressWarnings("unchecked")
+    Map<String, Object> info = (Map<String, Object>) infoParser.parse();
+
+    long totalLength = (long) (info.get("length") != null ? (Long) info.get("length") : 0L);
+    long pieceLength = (Long) info.get("piece length");
+    byte[] pieces = (byte[]) info.get("pieces");
+
+    return new TorrentMetadata(totalLength, pieceLength, pieces, infoBytes);
   }
 
   static byte[] downloadFile(List<Peer> peers, byte[] infoHashBytes, long totalLength, long pieceLength, byte[] pieces) throws Exception {
