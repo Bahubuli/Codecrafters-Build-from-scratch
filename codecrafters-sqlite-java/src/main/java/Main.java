@@ -15,20 +15,17 @@ public class Main {
 
     switch (command) {
       case ".dbinfo" -> {
-        try {
-          FileInputStream databaseFile = new FileInputStream(new File(databaseFilePath));
-          
+        try (FileInputStream databaseFile = new FileInputStream(new File(databaseFilePath))) {
           databaseFile.skip(16); // Skip the first 16 bytes of the header
           byte[] pageSizeBytes = new byte[2]; // The following 2 bytes are the page size
           databaseFile.read(pageSizeBytes);
           short pageSizeSigned = ByteBuffer.wrap(pageSizeBytes).getShort();
           int pageSize = Short.toUnsignedInt(pageSizeSigned);
+          if (pageSize == 1) {
+            pageSize = 65536;
+          }
 
-          // You can use print statements as follows for debugging, they'll be visible when running tests.
-          System.err.println("Logs from your program will appear here!");
-
-          // TODO: Uncomment the code below to pass the first stage
-          // System.out.println("database page size: " + pageSize);
+          System.out.println("database page size: " + pageSize);
         } catch (IOException e) {
           System.out.println("Error reading file: " + e.getMessage());
         }
