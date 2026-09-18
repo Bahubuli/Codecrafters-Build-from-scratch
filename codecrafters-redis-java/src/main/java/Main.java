@@ -209,6 +209,57 @@ public class Main {
     }
   }
 
+  private static final double MIN_LATITUDE = -85.05112878;
+  private static final double MAX_LATITUDE = 85.05112878;
+  private static final double MIN_LONGITUDE = -180.0;
+  private static final double MAX_LONGITUDE = 180.0;
+  private static final double LATITUDE_RANGE = MAX_LATITUDE - MIN_LATITUDE;
+  private static final double LONGITUDE_RANGE = MAX_LONGITUDE - MIN_LONGITUDE;
+
+  private static long spreadInt32ToInt64(long v) {
+    v = v & 0xFFFFFFFFL;
+    v = (v | (v << 16)) & 0x0000FFFF0000FFFFL;
+    v = (v | (v << 8))  & 0x00FF00FF00FF00FFL;
+    v = (v | (v << 4))  & 0x0F0F0F0F0F0F0F0FL;
+    v = (v | (v << 2))  & 0x3333333333333333L;
+    v = (v | (v << 1))  & 0x5555555555555555L;
+    return v;
+  }
+
+  private static long compactInt64ToInt32(long v) {
+    v = v & 0x5555555555555555L;
+    v = (v | (v >>> 1)) & 0x3333333333333333L;
+    v = (v | (v >>> 2)) & 0x0F0F0F0F0F0F0F0FL;
+    v = (v | (v >>> 4)) & 0x00FF00FF00FF00FFL;
+    v = (v | (v >>> 8)) & 0x0000FFFF0000FFFFL;
+    v = (v | (v >>> 16)) & 0x00000000FFFFFFFFL;
+    return v;
+  }
+
+  private static long encodeGeo(double lat, double lon) {
+    long normLat = (long) ((1L << 26) * (lat - MIN_LATITUDE) / LATITUDE_RANGE);
+    long normLon = (long) ((1L << 26) * (lon - MIN_LONGITUDE) / LONGITUDE_RANGE);
+    long x = spreadInt32ToInt64(normLat);
+    long y = spreadInt32ToInt64(normLon);
+    return x | (y << 1);
+  }
+
+  private static double[] decodeGeo(long score) {
+    long x = score;
+    long y = score >>> 1;
+    long gridLat = compactInt64ToInt32(x);
+    long gridLon = compactInt64ToInt32(y);
+
+    double gridLatMin = MIN_LATITUDE + LATITUDE_RANGE * ((double) gridLat / (1L << 26));
+    double gridLatMax = MIN_LATITUDE + LATITUDE_RANGE * ((double) (gridLat + 1) / (1L << 26));
+    double gridLonMin = MIN_LONGITUDE + LONGITUDE_RANGE * ((double) gridLon / (1L << 26));
+    double gridLonMax = MIN_LONGITUDE + LONGITUDE_RANGE * ((double) (gridLon + 1) / (1L << 26));
+
+    double lat = (gridLatMin + gridLatMax) / 2.0;
+    double lon = (gridLonMin + gridLonMax) / 2.0;
+    return new double[] { lon, lat };
+  }
+
   private static final Map<String, List<String>> listStore = new ConcurrentHashMap<>();
   private static final Map<String, List<StreamEntry>> streamStore = new ConcurrentHashMap<>();
   private static final Map<String, SortedSet> zsetStore = new ConcurrentHashMap<>();
@@ -834,8 +885,11 @@ public class Main {
           SortedSet zset = zsetStore.computeIfAbsent(key, k -> new SortedSet());
           int added = 0;
           for (int i = 2; i < parts.length; i += 3) {
+            double lon = Double.parseDouble(parts[i]);
+            double lat = Double.parseDouble(parts[i + 1]);
             String member = parts[i + 2];
-            added += zset.add(0.0, member);
+            long score = encodeGeo(lat, lon);
+            added += zset.add((double) score, member);
           }
           out.write((":" + added + "\r\n").getBytes(StandardCharsets.UTF_8));
         }
