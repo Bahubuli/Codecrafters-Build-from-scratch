@@ -339,8 +339,10 @@ public class Main {
 
                 // Wait briefly for tester to receive the request
                 try {
-                  Thread.sleep(2000);
-                } catch (InterruptedException ignored) {}
+                  System.err.println("SENT METADATA REQ peerUtMetadataId=" + peerUtMetadataId);
+                  PeerMessage resp = readMessage(in);
+                  System.err.println("RESP ID=" + resp.id + " len=" + resp.payload.length);
+                } catch (Exception ignored) {}
               }
             }
           }
