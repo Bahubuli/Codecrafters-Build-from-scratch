@@ -69,6 +69,8 @@ public class Main {
   private static final Object txExecutionLock = new Object();
   private static int port = 6379;
   private static String role = "master";
+  private static String masterHost = null;
+  private static int masterPort = -1;
 
   private static String getInfoReplication() {
     return "role:" + role;
@@ -812,6 +814,32 @@ public class Main {
           System.err.println("Invalid port number: " + args[i + 1]);
         }
         i++;
+      } else if ("--replicaof".equalsIgnoreCase(args[i]) && i + 1 < args.length) {
+        role = "slave";
+        String nextArg = args[i + 1];
+        if (nextArg.trim().contains(" ")) {
+          // Format: --replicaof "<HOST> <PORT>"
+          String[] hostPort = nextArg.trim().split("\\s+");
+          masterHost = hostPort[0];
+          try {
+            masterPort = Integer.parseInt(hostPort[1]);
+          } catch (NumberFormatException e) {
+            System.err.println("Invalid master port: " + hostPort[1]);
+          }
+          i++;
+        } else if (i + 2 < args.length) {
+          // Format: --replicaof <HOST> <PORT>
+          masterHost = nextArg;
+          try {
+            masterPort = Integer.parseInt(args[i + 2]);
+          } catch (NumberFormatException e) {
+            System.err.println("Invalid master port: " + args[i + 2]);
+          }
+          i += 2;
+        } else {
+          masterHost = nextArg;
+          i++;
+        }
       }
     }
 
