@@ -1,2 +1,3 @@
 target/
 .shell-repo/
+.http-repo/
