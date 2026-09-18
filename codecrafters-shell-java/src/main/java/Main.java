@@ -233,17 +233,26 @@ public class Main {
                     System.out.flush();
                     consecutiveTabs = 0;
                 } else if (matches.size() > 1) {
-                    consecutiveTabs++;
-                    if (consecutiveTabs == 1) {
-                        System.out.print("\u0007");
-                        System.out.flush();
-                    } else if (consecutiveTabs >= 2) {
-                        System.out.print("\n");
-                        System.out.print(String.join("  ", matches));
-                        System.out.print("\n");
-                        System.out.print("$ " + current);
+                    String lcp = longestCommonPrefix(matches);
+                    if (lcp.length() > current.length()) {
+                        String completion = lcp.substring(current.length());
+                        line.append(completion);
+                        System.out.print(completion);
                         System.out.flush();
                         consecutiveTabs = 0;
+                    } else {
+                        consecutiveTabs++;
+                        if (consecutiveTabs == 1) {
+                            System.out.print("\u0007");
+                            System.out.flush();
+                        } else if (consecutiveTabs >= 2) {
+                            System.out.print("\n");
+                            System.out.print(String.join("  ", matches));
+                            System.out.print("\n");
+                            System.out.print("$ " + current);
+                            System.out.flush();
+                            consecutiveTabs = 0;
+                        }
                     }
                 } else {
                     System.out.print("\u0007");
@@ -303,6 +312,28 @@ public class Main {
             }
         }
         return candidates;
+    }
+
+    private static String longestCommonPrefix(Set<String> strings) {
+        if (strings == null || strings.isEmpty()) {
+            return "";
+        }
+        String prefix = null;
+        for (String s : strings) {
+            if (prefix == null) {
+                prefix = s;
+            } else {
+                int i = 0;
+                while (i < prefix.length() && i < s.length() && prefix.charAt(i) == s.charAt(i)) {
+                    i++;
+                }
+                prefix = prefix.substring(0, i);
+                if (prefix.isEmpty()) {
+                    break;
+                }
+            }
+        }
+        return prefix != null ? prefix : "";
     }
 
     private static void prepareRedirectionFile(String pathStr, boolean append) throws Exception {
