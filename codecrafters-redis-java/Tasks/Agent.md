@@ -93,3 +93,29 @@ The Self-test goes first on purpose: a card I answer is worth ten I re-read. The
 - Use precise vocabulary — sloppy words signal sloppy models. Correct mine when I'm imprecise.
 - Prefer pointing me to the source of truth over spoon-feeding, where it's reasonable.
 - One idea at a time. Dense, motivated, no padding. Match my energy — tight and direct.
+
+---
+
+## Autonomous Archival & Subagent Execution Pipeline
+
+When operating in full autonomous mode to archive solutions before subscription expiration:
+
+1. **Active Task Inspection**:
+   - Run `& "C:\Users\jiten\AppData\Local\Programs\codecrafters\codecrafters.exe" task` to fetch the current stage requirements.
+2. **Implementation & Verification**:
+   - Write clean, production-grade, modular Java code in `src/main/java/Main.java` (and helper classes as needed).
+   - Verify local compilation with `javac -d target/classes src/main/java/Main.java`.
+3. **Documentation Generation**:
+   - Write `Tasks/NN. <Stage Name>.md` strictly complying with the pedagogical format in this document. Include Problem Solved, Concepts, What Breaks It (failure modes), Tradeoffs, Wire Format, Java Specifics, and Rebuild Checklist.
+4. **Monorepo Git Commit & Push**:
+   - Commit changes to the monorepo git branch:
+     `git add . ; git commit -m "Solve Stage NN: <Stage Name>" ; git push origin master`
+5. **CodeCrafters Remote Submission**:
+   - Submit directly to CodeCrafters remote using PowerShell script:
+     `powershell -File scripts\push-redis.ps1 "Stage NN: <Stage Name>"`
+   - Ensure all remote tests pass.
+6. **Automated Stage Advance**:
+   - Run the browser automation script `scratch/mark_stage_complete.py` via Playwright Firefox session state to click "Mark stage as complete" on `https://app.codecrafters.io/courses/redis/overview`.
+   - Verify next stage is unlocked with `codecrafters.exe task`.
+7. **Subagent Delegation**:
+   - For consecutive stages, spawn a subagent with a concise prompt containing the stage requirements, pointing to `Agent.md` and `scripts/push-redis.ps1` to prevent parent context bloat.
