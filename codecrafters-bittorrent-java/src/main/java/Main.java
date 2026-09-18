@@ -263,6 +263,90 @@ public class Main {
       MagnetLink parsed = parseMagnetLink(magnetLink);
       System.out.println("Tracker URL: " + parsed.trackerUrl);
       System.out.println("Info Hash: " + parsed.infoHash);
+    } else if ("magnet_info".equals(command)) {
+      String magnetLink = args[1];
+      MagnetLink parsed = parseMagnetLink(magnetLink);
+      byte[] infoHashBytes = hexToBytes(parsed.infoHash);
+
+      List<Peer> peers = getPeers(parsed.trackerUrl, infoHashBytes, 999);
+      if (peers.isEmpty()) {
+        throw new RuntimeException("No peers discovered from tracker");
+      }
+
+      byte[] handshake = new byte[68];
+      handshake[0] = 19;
+      byte[] protocolBytes = "BitTorrent protocol".getBytes(StandardCharsets.ISO_8859_1);
+      System.arraycopy(protocolBytes, 0, handshake, 1, 19);
+      handshake[25] = 0x10;
+      System.arraycopy(infoHashBytes, 0, handshake, 28, 20);
+      byte[] myPeerId = generatePeerId();
+      System.arraycopy(myPeerId, 0, handshake, 48, 20);
+
+      boolean connected = false;
+      for (Peer peer : peers) {
+        try (Socket socket = new Socket(peer.ip, peer.port)) {
+          socket.setSoTimeout(10000);
+          OutputStream out = socket.getOutputStream();
+          InputStream in = socket.getInputStream();
+
+          out.write(handshake);
+          out.flush();
+
+          byte[] response = in.readNBytes(68);
+          if (response.length < 68) {
+            continue;
+          }
+
+          boolean peerSupportsExtensions = (response[25] & 0x10) != 0;
+          readMessage(in); // Bitfield
+
+          if (peerSupportsExtensions) {
+            byte[] bencodedDict = "d1:md11:ut_metadatai16eee".getBytes(StandardCharsets.UTF_8);
+            int extPayloadLen = 1 + bencodedDict.length;
+            ByteBuffer extMsg = ByteBuffer.allocate(4 + 1 + extPayloadLen);
+            extMsg.putInt(1 + extPayloadLen);
+            extMsg.put((byte) 20);
+            extMsg.put((byte) 0);
+            extMsg.put(bencodedDict);
+
+            out.write(extMsg.array());
+            out.flush();
+
+            PeerMessage extResp = readMessage(in);
+            if (extResp.id == 20 && extResp.payload.length > 1 && extResp.payload[0] == 0) {
+              byte[] dictBytes = Arrays.copyOfRange(extResp.payload, 1, extResp.payload.length);
+              ByteBencodeParser extParser = new ByteBencodeParser(dictBytes);
+              @SuppressWarnings("unchecked")
+              Map<String, Object> extDict = (Map<String, Object>) extParser.parse();
+              @SuppressWarnings("unchecked")
+              Map<String, Object> mDict = (Map<String, Object>) extDict.get("m");
+              if (mDict != null && mDict.containsKey("ut_metadata")) {
+                long peerUtMetadataId = (Long) mDict.get("ut_metadata");
+
+                // Send metadata request: msg_type=0, piece=0
+                byte[] reqDict = "d8:msg_typei0e6:piecei0ee".getBytes(StandardCharsets.UTF_8);
+                int reqPayloadLen = 1 + reqDict.length;
+                ByteBuffer metaReqMsg = ByteBuffer.allocate(4 + 1 + reqPayloadLen);
+                metaReqMsg.putInt(1 + reqPayloadLen);
+                metaReqMsg.put((byte) 20);
+                metaReqMsg.put((byte) peerUtMetadataId);
+                metaReqMsg.put(reqDict);
+
+                out.write(metaReqMsg.array());
+                out.flush();
+              }
+            }
+          }
+
+          connected = true;
+          break;
+        } catch (Exception e) {
+          // Try next peer
+        }
+      }
+      if (!connected) {
+        throw new RuntimeException("Failed to connect and handshake with any peer");
+      }
     } else if ("magnet_handshake".equals(command)) {
       String magnetLink = args[1];
       MagnetLink parsed = parseMagnetLink(magnetLink);
