@@ -786,7 +786,9 @@ public class Main {
               if (inTx[0]) {
                 if (command.equalsIgnoreCase("EXEC")) {
                   inTx[0] = false;
+                  // Failures within transactions: emit array header for all queued command responses
                   out.write(("*" + txQueue.size() + "\r\n").getBytes(StandardCharsets.UTF_8));
+                  // Errors inside transactions are emitted as RESP error elements; subsequent commands continue
                   for (String[] cmd : txQueue) {
                     handleCommand(cmd, out);
                   }
