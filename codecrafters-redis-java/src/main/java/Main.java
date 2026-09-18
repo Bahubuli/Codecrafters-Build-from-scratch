@@ -1979,6 +1979,40 @@ public class Main {
                     }
                   }
                 }
+              } else if (command.equalsIgnoreCase("UNSUBSCRIBE")) {
+                List<String> chansToUnsub = new ArrayList<>();
+                if (parts.length > 1) {
+                  for (int i = 1; i < parts.length; i++) {
+                    chansToUnsub.add(parts[i]);
+                  }
+                } else {
+                  chansToUnsub.addAll(clientCtx.subscribedChannels);
+                  if (chansToUnsub.isEmpty()) {
+                    synchronized (out) {
+                      out.write("*3\r\n$11\r\nunsubscribe\r\n$-1\r\n:0\r\n".getBytes(StandardCharsets.UTF_8));
+                      out.flush();
+                    }
+                  }
+                }
+
+                for (String chan : chansToUnsub) {
+                  clientCtx.subscribedChannels.remove(chan);
+                  Set<ClientContext> subs = channelSubscribers.get(chan);
+                  if (subs != null) {
+                    subs.remove(clientCtx);
+                  }
+                  int remaining = clientCtx.subscribedChannels.size();
+                  StringBuilder resp = new StringBuilder();
+                  resp.append("*3\r\n");
+                  resp.append("$11\r\nunsubscribe\r\n");
+                  byte[] chanBytes = chan.getBytes(StandardCharsets.UTF_8);
+                  resp.append("$").append(chanBytes.length).append("\r\n").append(chan).append("\r\n");
+                  resp.append(":").append(remaining).append("\r\n");
+                  synchronized (out) {
+                    out.write(resp.toString().getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                  }
+                }
               } else {
                 handleCommand(parts, out);
                 out.flush();
