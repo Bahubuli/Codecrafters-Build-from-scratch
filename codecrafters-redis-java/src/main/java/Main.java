@@ -923,6 +923,18 @@ public class Main {
       out.write(response.getBytes(StandardCharsets.UTF_8));
     } else if (command.equalsIgnoreCase("UNWATCH")) {
       out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
+    } else if (command.equalsIgnoreCase("WAIT")) {
+      // Stage 66: WAIT <numreplicas> <timeout>
+      // The WAIT command checks how many replicas have acknowledged all previous write commands.
+      // Format: WAIT <numreplicas> <timeout>
+      // When no replicas are connected (replicas.isEmpty()), immediately return :0\r\n.
+      int numReplicas = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
+      long timeout = parts.length > 2 ? Long.parseLong(parts[2]) : 0;
+      if (replicas.isEmpty()) {
+        out.write(":0\r\n".getBytes(StandardCharsets.UTF_8));
+      } else {
+        out.write((":" + replicas.size() + "\r\n").getBytes(StandardCharsets.UTF_8));
+      }
     }
   }
 
