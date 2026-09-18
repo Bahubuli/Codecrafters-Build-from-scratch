@@ -76,7 +76,7 @@ public class Main {
         long pageOffset = (long) (rootpage - 1) * pageSize;
         int btreeHeaderOffset = (rootpage == 1) ? 100 : 0;
 
-        if (query.isCount) {
+        if (query.isCount && query.whereColumn == null) {
           databaseFile.seek(pageOffset + btreeHeaderOffset + 3);
           int rowCount = databaseFile.readUnsignedShort();
           System.out.println(rowCount);
@@ -86,20 +86,37 @@ public class Main {
         // Parse column definitions from CREATE TABLE sql statement
         List<ColumnInfo> columns = parseColumns(targetTable.sql);
         List<Integer> targetColIndices = new ArrayList<>();
-        for (String reqCol : query.columns) {
-          int targetColIndex = -1;
+        if (!query.isCount) {
+          for (String reqCol : query.columns) {
+            int targetColIndex = -1;
+            for (int i = 0; i < columns.size(); i++) {
+              if (columns.get(i).name.equalsIgnoreCase(reqCol)) {
+                targetColIndex = i;
+                break;
+              }
+            }
+
+            if (targetColIndex == -1) {
+              System.out.println("Column not found: " + reqCol);
+              return;
+            }
+            targetColIndices.add(targetColIndex);
+          }
+        }
+
+        int whereColIndex = -1;
+        if (query.whereColumn != null) {
           for (int i = 0; i < columns.size(); i++) {
-            if (columns.get(i).name.equalsIgnoreCase(reqCol)) {
-              targetColIndex = i;
+            if (columns.get(i).name.equalsIgnoreCase(query.whereColumn)) {
+              whereColIndex = i;
               break;
             }
           }
 
-          if (targetColIndex == -1) {
-            System.out.println("Column not found: " + reqCol);
+          if (whereColIndex == -1) {
+            System.out.println("Column not found: " + query.whereColumn);
             return;
           }
-          targetColIndices.add(targetColIndex);
         }
 
         // Read table root page
@@ -111,6 +128,7 @@ public class Main {
         int cellCount = Short.toUnsignedInt(pageBuffer.getShort(btreeHeaderOffset + 3));
         int cellPointerArrayOffset = btreeHeaderOffset + 8;
 
+        int matchCount = 0;
         for (int i = 0; i < cellCount; i++) {
           int cellOffset = Short.toUnsignedInt(pageBuffer.getShort(cellPointerArrayOffset + i * 2));
           pageBuffer.position(cellOffset);
@@ -148,6 +166,19 @@ public class Main {
             }
           }
 
+          // Check WHERE condition
+          if (whereColIndex != -1) {
+            String rowVal = recordValues[whereColIndex];
+            if (rowVal == null || !rowVal.equals(query.whereValue)) {
+              continue;
+            }
+          }
+
+          if (query.isCount) {
+            matchCount++;
+            continue;
+          }
+
           // Build row output according to requested columns order
           List<String> rowValues = new ArrayList<>();
           for (int colIdx : targetColIndices) {
@@ -156,6 +187,10 @@ public class Main {
           }
 
           System.out.println(String.join("|", rowValues));
+        }
+
+        if (query.isCount) {
+          System.out.println(matchCount);
         }
       } catch (IOException e) {
         System.out.println("Error reading file: " + e.getMessage());
@@ -169,24 +204,62 @@ public class Main {
     List<String> columns;
     String tableName;
     boolean isCount;
+    String whereColumn;
+    String whereValue;
 
-    SelectQuery(List<String> columns, String tableName, boolean isCount) {
+    SelectQuery(List<String> columns, String tableName, boolean isCount, String whereColumn, String whereValue) {
       this.columns = columns;
       this.tableName = tableName;
       this.isCount = isCount;
+      this.whereColumn = whereColumn;
+      this.whereValue = whereValue;
     }
   }
 
   static SelectQuery parseSelectQuery(String sql) {
-    Matcher matcher = Pattern.compile("(?is)^SELECT\\s+(.+?)\\s+FROM\\s+([^;\\s]+)\\s*;?$").matcher(sql.trim());
+    Matcher matcher = Pattern.compile("(?is)^SELECT\\s+(.+?)\\s+FROM\\s+((?:\"[^\"]+\"|'[^']+'|`[^`]+`|\\[[^\\]]+\\]|[^\\s;]+))(?:\\s+WHERE\\s+(.+))?\\s*;?$").matcher(sql.trim());
     if (!matcher.find()) {
       return null;
     }
     String selectExpr = matcher.group(1).trim();
     String tableName = matcher.group(2).trim().replaceAll("[\"'\\[\\]`]", "");
     boolean isCount = selectExpr.replaceAll("\\s+", "").equalsIgnoreCase("count(*)");
+
+    String whereColumn = null;
+    String whereValue = null;
+    String whereClause = matcher.group(3);
+    if (whereClause != null) {
+      whereClause = whereClause.trim();
+      if (whereClause.endsWith(";")) {
+        whereClause = whereClause.substring(0, whereClause.length() - 1).trim();
+      }
+      int eqIndex = whereClause.indexOf("==");
+      int opLen = 2;
+      if (eqIndex == -1) {
+        eqIndex = whereClause.indexOf('=');
+        opLen = 1;
+      }
+      if (eqIndex != -1) {
+        whereColumn = whereClause.substring(0, eqIndex).trim();
+        whereValue = whereClause.substring(eqIndex + opLen).trim();
+
+        whereColumn = whereColumn.replaceAll("[\"'\\[\\]`]", "").trim();
+        if (whereColumn.contains(".")) {
+          whereColumn = whereColumn.substring(whereColumn.lastIndexOf('.') + 1).trim();
+        }
+
+        if (whereValue.length() >= 2) {
+          if ((whereValue.startsWith("'") && whereValue.endsWith("'")) ||
+              (whereValue.startsWith("\"") && whereValue.endsWith("\""))) {
+            whereValue = whereValue.substring(1, whereValue.length() - 1);
+          }
+        }
+        whereValue = whereValue.replace("''", "'");
+      }
+    }
+
     if (isCount) {
-      return new SelectQuery(List.of(), tableName, true);
+      return new SelectQuery(List.of(), tableName, true, whereColumn, whereValue);
     }
     String[] parts = selectExpr.split(",");
     List<String> columns = new ArrayList<>();
@@ -199,7 +272,7 @@ public class Main {
         columns.add(col);
       }
     }
-    return new SelectQuery(columns, tableName, false);
+    return new SelectQuery(columns, tableName, false, whereColumn, whereValue);
   }
 
   static class ColumnInfo {
