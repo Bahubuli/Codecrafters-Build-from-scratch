@@ -271,11 +271,8 @@ public class Main {
                     if (COMPLETION_SPECS.containsKey(firstWord)) {
                         String script = COMPLETION_SPECS.get(firstWord);
                         List<String> scriptOutput = runCompleterScript(script);
-                        if (!scriptOutput.isEmpty()) {
-                            matches = new TreeSet<>(scriptOutput);
-                        }
-                    }
-                    if (matches == null) {
+                        matches = new TreeSet<>(scriptOutput);
+                    } else {
                         matches = getFileCompletions(word);
                     }
                 }
