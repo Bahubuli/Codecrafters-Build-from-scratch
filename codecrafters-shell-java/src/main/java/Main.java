@@ -660,6 +660,19 @@ public class Main {
             }
             out.flush();
         } else if (command.equals("declare")) {
+            if (cmdArgs.size() >= 2 && cmdArgs.get(1).equals("-p")) {
+                int exitCode = 0;
+                if (cmdArgs.size() > 2) {
+                    for (int i = 2; i < cmdArgs.size(); i++) {
+                        String varName = cmdArgs.get(i);
+                        err.println("declare: " + varName + ": not found");
+                        exitCode = 1;
+                    }
+                }
+                err.flush();
+                out.flush();
+                return exitCode;
+            }
             out.flush();
         } else if (command.equals("jobs")) {
             synchronized (backgroundJobs) {
