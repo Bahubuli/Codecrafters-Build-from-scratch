@@ -67,6 +67,7 @@ public class Main {
   private static final Map<String, Set<ClientContext>> keyWatchers = new ConcurrentHashMap<>();
   private static final Object streamNotifier = new Object();
   private static final Object txExecutionLock = new Object();
+  private static int port = 6379;
 
   private static Object getLock(String key) {
     return keyLocks.computeIfAbsent(key, k -> new Object());
@@ -793,7 +794,16 @@ public class Main {
   public static void main(String[] args) {
     System.out.println("Logs from your program will appear here!");
 
-    int port = 6379;
+    for (int i = 0; i < args.length; i++) {
+      if ("--port".equalsIgnoreCase(args[i]) && i + 1 < args.length) {
+        try {
+          port = Integer.parseInt(args[i + 1]);
+        } catch (NumberFormatException e) {
+          System.err.println("Invalid port number: " + args[i + 1]);
+        }
+        i++;
+      }
+    }
 
     try {
       ServerSocket serverSocket = new ServerSocket(port);
