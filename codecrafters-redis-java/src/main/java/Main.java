@@ -801,6 +801,7 @@ public class Main {
         }
       }
     } else if (command.equalsIgnoreCase("REPLCONF")) {
+      // Stage 58: Replication handshake - master responds +OK to REPLCONF listening-port and REPLCONF capa
       out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
     } else if (command.equalsIgnoreCase("INFO")) {
       String info = getInfoReplication();
