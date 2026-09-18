@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 public class Main {
-    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "complete", "jobs");
+    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "complete", "jobs", "history");
     private static final Map<String, String> COMPLETION_SPECS = new HashMap<>();
     private static Path currentDir = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
     private static final AtomicInteger nextJobId = new AtomicInteger(1);
@@ -42,6 +42,7 @@ public class Main {
     }
 
     private static final List<Job> backgroundJobs = new ArrayList<>();
+    private static final List<String> commandHistory = new ArrayList<>();
 
     static class ParsedCommand {
         List<String> cmdArgs = new ArrayList<>();
@@ -62,6 +63,7 @@ public class Main {
             if (input == null) {
                 break;
             }
+            commandHistory.add(input);
             List<String> parsedArgs = parseArguments(input);
             if (parsedArgs.isEmpty()) {
                 continue;
@@ -578,6 +580,13 @@ public class Main {
             }
             out.flush();
             err.flush();
+        } else if (command.equals("history")) {
+            synchronized (commandHistory) {
+                for (int i = 0; i < commandHistory.size(); i++) {
+                    out.printf("%5d  %s\n", i + 1, commandHistory.get(i));
+                }
+            }
+            out.flush();
         } else if (command.equals("jobs")) {
             synchronized (backgroundJobs) {
                 int n = backgroundJobs.size();
