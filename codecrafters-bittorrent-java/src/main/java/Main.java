@@ -1,4 +1,8 @@
 import com.google.gson.Gson;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -57,6 +61,56 @@ public class Main {
         byte[] pieceHash = Arrays.copyOfRange(pieces, i, i + 20);
         System.out.println(bytesToHex(pieceHash));
       }
+    } else if ("peers".equals(command)) {
+      String torrentFilePath = args[1];
+      byte[] torrentBytes = Files.readAllBytes(Path.of(torrentFilePath));
+      ByteBencodeParser parser = new ByteBencodeParser(torrentBytes);
+      @SuppressWarnings("unchecked")
+      Map<String, Object> torrent = (Map<String, Object>) parser.parse();
+      String announce = (String) torrent.get("announce");
+      @SuppressWarnings("unchecked")
+      Map<String, Object> info = (Map<String, Object>) torrent.get("info");
+      long length = (Long) info.get("length");
+
+      byte[] rawInfoBytes = parser.getRawInfoBytes();
+      MessageDigest md = MessageDigest.getInstance("SHA-1");
+      byte[] infoHashBytes = md.digest(rawInfoBytes);
+
+      String peerId = "00112233445566778899";
+      char separator = announce.contains("?") ? '&' : '?';
+      String url = announce + separator
+          + "info_hash=" + urlEncodeBytes(infoHashBytes)
+          + "&peer_id=" + peerId
+          + "&port=6881"
+          + "&uploaded=0"
+          + "&downloaded=0"
+          + "&left=" + length
+          + "&compact=1";
+
+      HttpClient client = HttpClient.newHttpClient();
+      HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
+      HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+
+      ByteBencodeParser respParser = new ByteBencodeParser(response.body());
+      @SuppressWarnings("unchecked")
+      Map<String, Object> trackerResponse = (Map<String, Object>) respParser.parse();
+
+      Object peersObj = trackerResponse.get("peers");
+      if (peersObj instanceof byte[]) {
+        byte[] peersBytes = (byte[]) peersObj;
+        for (int i = 0; i + 6 <= peersBytes.length; i += 6) {
+          String ip = (peersBytes[i] & 0xFF) + "." + (peersBytes[i + 1] & 0xFF) + "."
+                    + (peersBytes[i + 2] & 0xFF) + "." + (peersBytes[i + 3] & 0xFF);
+          int port = ((peersBytes[i + 4] & 0xFF) << 8) | (peersBytes[i + 5] & 0xFF);
+          System.out.println(ip + ":" + port);
+        }
+      } else if (peersObj instanceof List) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> peersList = (List<Map<String, Object>>) peersObj;
+        for (Map<String, Object> p : peersList) {
+          System.out.println(p.get("ip") + ":" + p.get("port"));
+        }
+      }
     } else {
       System.out.println("Unknown command: " + command);
     }
@@ -71,6 +125,20 @@ public class Main {
     StringBuilder sb = new StringBuilder(bytes.length * 2);
     for (byte b : bytes) {
       sb.append(String.format("%02x", b));
+    }
+    return sb.toString();
+  }
+
+  private static String urlEncodeBytes(byte[] bytes) {
+    StringBuilder sb = new StringBuilder();
+    for (byte b : bytes) {
+      char c = (char) (b & 0xFF);
+      if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+          || c == '.' || c == '-' || c == '_' || c == '~') {
+        sb.append(c);
+      } else {
+        sb.append(String.format("%%%02x", b & 0xFF));
+      }
     }
     return sb.toString();
   }
@@ -164,7 +232,7 @@ public class Main {
         String key = new String(keyBytes, StandardCharsets.UTF_8);
         int valStart = index;
         Object value;
-        if ("pieces".equals(key)) {
+        if ("pieces".equals(key) || "peers".equals(key)) {
           value = parseStringBytes();
         } else {
           value = parse();

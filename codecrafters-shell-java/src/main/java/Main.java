@@ -25,6 +25,21 @@ public class Main {
     private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "complete", "jobs", "history", "declare");
     private static final Map<String, String> COMPLETION_SPECS = new HashMap<>();
     private static final Map<String, String> SHELL_VARIABLES = new HashMap<>();
+    private static boolean isValidIdentifier(String name) {
+        if (name == null || name.isEmpty()) return false;
+        char first = name.charAt(0);
+        if (!((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_')) {
+            return false;
+        }
+        for (int i = 1; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static Path currentDir = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
     private static final AtomicInteger nextJobId = new AtomicInteger(1);
 
@@ -677,18 +692,26 @@ public class Main {
                 err.flush();
                 out.flush();
                 return exitCode;
-            } else if (!inSubshell) {
+            } else {
+                int exitCode = 0;
                 for (int i = 1; i < cmdArgs.size(); i++) {
                     String arg = cmdArgs.get(i);
                     int eqIndex = arg.indexOf('=');
-                    if (eqIndex != -1) {
-                        String name = arg.substring(0, eqIndex);
-                        String value = arg.substring(eqIndex + 1);
+                    String name = eqIndex != -1 ? arg.substring(0, eqIndex) : arg;
+                    String value = eqIndex != -1 ? arg.substring(eqIndex + 1) : null;
+                    if (!isValidIdentifier(name)) {
+                        err.println("declare: `" + arg + "': not a valid identifier");
+                        exitCode = 1;
+                        continue;
+                    }
+                    if (eqIndex != -1 && !inSubshell) {
                         SHELL_VARIABLES.put(name, value);
                     }
                 }
+                err.flush();
+                out.flush();
+                return exitCode;
             }
-            out.flush();
         } else if (command.equals("jobs")) {
             synchronized (backgroundJobs) {
                 int n = backgroundJobs.size();
