@@ -79,7 +79,7 @@ public class Main {
   private static long masterReplOffset = 0;
   private static final String EMPTY_RDB_BASE64 =
       "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==";
-  private static final List<OutputStream> replicas = new CopyOnWriteArrayList<>();
+  private static final CopyOnWriteArrayList<OutputStream> replicas = new CopyOnWriteArrayList<>();
 
   private static String getInfoReplication() {
     if ("master".equalsIgnoreCase(role)) {
@@ -87,6 +87,33 @@ public class Main {
     }
     return "role:" + role;
   }
+
+  private static synchronized void propagate(String[] parts) {
+    if (!"master".equalsIgnoreCase(role)) {
+      return;
+    }
+    StringBuilder sb = new StringBuilder();
+    sb.append("*").append(parts.length).append("\r\n");
+    for (int i = 0; i < parts.length; i++) {
+      String token = (i == 0) ? parts[i].toUpperCase() : parts[i];
+      byte[] b = token.getBytes(StandardCharsets.UTF_8);
+      sb.append("$").append(b.length).append("\r\n").append(token).append("\r\n");
+    }
+    byte[] msg = sb.toString().getBytes(StandardCharsets.UTF_8);
+    masterReplOffset += msg.length;
+
+    for (OutputStream replicaOut : replicas) {
+      try {
+        synchronized (replicaOut) {
+          replicaOut.write(msg);
+          replicaOut.flush();
+        }
+      } catch (IOException e) {
+        replicas.remove(replicaOut);
+      }
+    }
+  }
+
 
   private static Object getLock(String key) {
     return keyLocks.computeIfAbsent(key, k -> new Object());
@@ -186,6 +213,7 @@ public class Main {
       store.put(key, new Entry(value, expiresAt));
       touchWatchedKey(key);
       out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
+      propagate(parts);
     } else if (command.equalsIgnoreCase("GET")) {
       String key = parts[1];
       Entry entry = store.get(key);
@@ -821,9 +849,7 @@ public class Main {
       out.flush();
 
       // Track replica connection for subsequent command propagation
-      if (!replicas.contains(out)) {
-        replicas.add(out);
-      }
+      replicas.addIfAbsent(out);
     } else if (command.equalsIgnoreCase("INFO")) {
       String info = getInfoReplication();
       byte[] bytes = info.getBytes(StandardCharsets.UTF_8);
