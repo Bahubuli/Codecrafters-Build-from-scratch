@@ -14,12 +14,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 public class Main {
     private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "complete", "jobs");
     private static final Map<String, String> COMPLETION_SPECS = new HashMap<>();
     private static Path currentDir = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
+    private static final AtomicInteger nextJobId = new AtomicInteger(1);
 
     public static void main(String[] args) throws Exception {
         enableRawMode();
@@ -32,6 +34,17 @@ public class Main {
                 break;
             }
             List<String> parsedArgs = parseArguments(input);
+            if (parsedArgs.isEmpty()) {
+                continue;
+            }
+
+            // Check for background job operator (& at the end)
+            boolean isBackground = false;
+            if (!parsedArgs.isEmpty() && parsedArgs.get(parsedArgs.size() - 1).equals("&")) {
+                isBackground = true;
+                parsedArgs.remove(parsedArgs.size() - 1);
+            }
+
             if (parsedArgs.isEmpty()) {
                 continue;
             }
@@ -208,25 +221,46 @@ public class Main {
             } else {
                 Path executable = findExecutable(command);
                 if (executable != null) {
-                    setRawMode(false);
-                    try {
+                    if (isBackground) {
                         ProcessBuilder pb = new ProcessBuilder(cmdArgs);
                         pb.directory(currentDir.toFile());
                         if (outPath != null) {
                             pb.redirectOutput(appendOut ? ProcessBuilder.Redirect.appendTo(outPath.toFile()) : ProcessBuilder.Redirect.to(outPath.toFile()));
                         } else {
-                            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                            pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
                         }
                         if (errPath != null) {
                             pb.redirectError(appendErr ? ProcessBuilder.Redirect.appendTo(errPath.toFile()) : ProcessBuilder.Redirect.to(errPath.toFile()));
                         } else {
-                            pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+                            pb.redirectError(ProcessBuilder.Redirect.DISCARD);
                         }
-                        pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+                        pb.redirectInput(ProcessBuilder.Redirect.DISCARD);
                         Process process = pb.start();
-                        process.waitFor();
-                    } finally {
-                        setRawMode(true);
+                        int jobId = nextJobId.getAndIncrement();
+                        long pid = process.pid();
+                        System.out.println("[" + jobId + "] " + pid);
+                        System.out.flush();
+                    } else {
+                        setRawMode(false);
+                        try {
+                            ProcessBuilder pb = new ProcessBuilder(cmdArgs);
+                            pb.directory(currentDir.toFile());
+                            if (outPath != null) {
+                                pb.redirectOutput(appendOut ? ProcessBuilder.Redirect.appendTo(outPath.toFile()) : ProcessBuilder.Redirect.to(outPath.toFile()));
+                            } else {
+                                pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                            }
+                            if (errPath != null) {
+                                pb.redirectError(appendErr ? ProcessBuilder.Redirect.appendTo(errPath.toFile()) : ProcessBuilder.Redirect.to(errPath.toFile()));
+                            } else {
+                                pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+                            }
+                            pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+                            Process process = pb.start();
+                            process.waitFor();
+                        } finally {
+                            setRawMode(true);
+                        }
                     }
                 } else {
                     System.out.println(command + ": command not found");
