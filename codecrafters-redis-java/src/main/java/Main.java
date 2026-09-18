@@ -172,6 +172,10 @@ public class Main {
       return dict.size();
     }
 
+    synchronized Double getScore(String member) {
+      return dict.get(member);
+    }
+
     synchronized List<String> range(int start, int stop) {
       int n = tree.size();
       if (n == 0) return Collections.emptyList();
@@ -750,6 +754,25 @@ public class Main {
         SortedSet zset = zsetStore.get(key);
         int card = (zset == null) ? 0 : zset.size();
         out.write((":" + card + "\r\n").getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      }
+    } else if (command.equalsIgnoreCase("ZSCORE")) {
+      if (parts.length < 3) {
+        out.write("-ERR wrong number of arguments for 'zscore' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      } else {
+        String key = parts[1];
+        String member = parts[2];
+        SortedSet zset = zsetStore.get(key);
+        Double score = (zset == null) ? null : zset.getScore(member);
+        if (score == null) {
+          out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
+        } else {
+          String scoreStr = (score == (long) (double) score)
+              ? Long.toString((long) (double) score)
+              : Double.toString(score);
+          out.write(("$" + scoreStr.length() + "\r\n" + scoreStr + "\r\n").getBytes(StandardCharsets.UTF_8));
+        }
         out.flush();
       }
     } else if (command.equalsIgnoreCase("ZRANGE")) {
