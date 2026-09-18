@@ -9,20 +9,40 @@ import java.util.Set;
 
 public class Main {
     public static void main(String[] args) {
-        if (args.length != 2 || !args[0].equals("-E")) {
-            System.out.println("Usage: ./your_program.sh -E <pattern>");
+        boolean onlyMatching = false;
+        String pattern = null;
+
+        for (int i = 0; i < args.length; i++) {
+            if (args[i].equals("-o") || args[i].equals("--only-matching")) {
+                onlyMatching = true;
+            } else if (args[i].equals("-E")) {
+                if (i + 1 < args.length) {
+                    pattern = args[++i];
+                }
+            }
+        }
+
+        if (pattern == null) {
+            System.out.println("Usage: ./your_program.sh [-o] -E <pattern>");
             System.exit(1);
         }
 
-        String pattern = args[1];
         Scanner scanner = new Scanner(System.in);
         boolean matchedAny = false;
 
         while (scanner.hasNextLine()) {
             String line = scanner.nextLine();
-            if (matchPattern(line, pattern)) {
-                System.out.println(line);
-                matchedAny = true;
+            if (onlyMatching) {
+                String match = findFirstMatch(line, pattern);
+                if (match != null) {
+                    System.out.println(match);
+                    matchedAny = true;
+                }
+            } else {
+                if (matchPattern(line, pattern)) {
+                    System.out.println(line);
+                    matchedAny = true;
+                }
             }
         }
 
@@ -247,6 +267,10 @@ public class Main {
     }
 
     public static boolean matchPattern(String inputLine, String pattern) {
+        return findFirstMatch(inputLine, pattern) != null;
+    }
+
+    public static String findFirstMatch(String inputLine, String pattern) {
         boolean anchorStart = false;
         boolean anchorEnd = false;
         String activePattern = pattern;
@@ -264,22 +288,30 @@ public class Main {
         List<PatternNode> nodes = parser.parse();
 
         if (nodes.isEmpty()) {
-            return !anchorEnd || inputLine.isEmpty();
+            if (anchorEnd && !inputLine.isEmpty()) {
+                return null;
+            }
+            return "";
         }
 
         if (anchorStart) {
-            return matchesNodesAt(inputLine, 0, nodes, 0, anchorEnd, new HashMap<>());
+            int end = matchEndNodesAt(inputLine, 0, nodes, 0, anchorEnd, new HashMap<>());
+            if (end != -1) {
+                return inputLine.substring(0, end);
+            }
+            return null;
         }
 
         for (int start = 0; start <= inputLine.length(); start++) {
-            if (matchesNodesAt(inputLine, start, nodes, 0, anchorEnd, new HashMap<>())) {
-                return true;
+            int end = matchEndNodesAt(inputLine, start, nodes, 0, anchorEnd, new HashMap<>());
+            if (end != -1) {
+                return inputLine.substring(start, end);
             }
         }
-        return false;
+        return null;
     }
 
-    private static boolean matchesNodesAt(
+    private static int matchEndNodesAt(
         String inputLine,
         int textIdx,
         List<PatternNode> nodes,
@@ -289,9 +321,9 @@ public class Main {
     ) {
         if (nodeIdx == nodes.size()) {
             if (anchorEnd) {
-                return textIdx == inputLine.length();
+                return textIdx == inputLine.length() ? textIdx : -1;
             }
-            return true;
+            return textIdx;
         }
 
         PatternNode current = nodes.get(nodeIdx);
@@ -300,30 +332,32 @@ public class Main {
             TokenNode tn = (TokenNode) current;
             if (tn.quantifier == Quantifier.EXACTLY_ONE) {
                 if (textIdx < inputLine.length() && tn.token.matches(inputLine.charAt(textIdx))) {
-                    return matchesNodesAt(inputLine, textIdx + 1, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+                    return matchEndNodesAt(inputLine, textIdx + 1, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
                 }
-                return false;
+                return -1;
             } else if (tn.quantifier == Quantifier.ONE_OR_MORE) {
                 if (textIdx >= inputLine.length() || !tn.token.matches(inputLine.charAt(textIdx))) {
-                    return false;
+                    return -1;
                 }
                 int maxMatch = textIdx;
                 while (maxMatch < inputLine.length() && tn.token.matches(inputLine.charAt(maxMatch))) {
                     maxMatch++;
                 }
                 for (int end = maxMatch; end >= textIdx + 1; end--) {
-                    if (matchesNodesAt(inputLine, end, nodes, nodeIdx + 1, anchorEnd, capturedGroups)) {
-                        return true;
+                    int res = matchEndNodesAt(inputLine, end, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+                    if (res != -1) {
+                        return res;
                     }
                 }
-                return false;
+                return -1;
             } else if (tn.quantifier == Quantifier.ZERO_OR_ONE) {
                 if (textIdx < inputLine.length() && tn.token.matches(inputLine.charAt(textIdx))) {
-                    if (matchesNodesAt(inputLine, textIdx + 1, nodes, nodeIdx + 1, anchorEnd, capturedGroups)) {
-                        return true;
+                    int res = matchEndNodesAt(inputLine, textIdx + 1, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+                    if (res != -1) {
+                        return res;
                     }
                 }
-                return matchesNodesAt(inputLine, textIdx, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+                return matchEndNodesAt(inputLine, textIdx, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
             }
         } else if (current instanceof GroupNode) {
             GroupNode gn = (GroupNode) current;
@@ -334,24 +368,28 @@ public class Main {
                     String captured = inputLine.substring(textIdx, endPos);
                     Map<Integer, String> newCaptured = new HashMap<>(capturedGroups);
                     newCaptured.put(gn.groupId, captured);
-                    if (matchesNodesAt(inputLine, endPos, nodes, nodeIdx + 1, anchorEnd, newCaptured)) {
-                        return true;
+                    int res = matchEndNodesAt(inputLine, endPos, nodes, nodeIdx + 1, anchorEnd, newCaptured);
+                    if (res != -1) {
+                        return res;
                     }
                 }
             }
-            return false;
+            if (gn.quantifier == Quantifier.ZERO_OR_ONE) {
+                return matchEndNodesAt(inputLine, textIdx, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+            }
+            return -1;
         } else if (current instanceof BackreferenceNode) {
             BackreferenceNode bn = (BackreferenceNode) current;
             String captured = capturedGroups.get(bn.groupNum);
             if (captured == null) {
-                return false;
+                return -1;
             }
             if (inputLine.startsWith(captured, textIdx)) {
-                return matchesNodesAt(inputLine, textIdx + captured.length(), nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+                return matchEndNodesAt(inputLine, textIdx + captured.length(), nodes, nodeIdx + 1, anchorEnd, capturedGroups);
             }
-            return false;
+            return -1;
         }
-        return false;
+        return -1;
     }
 
     private static void findBranchMatches(
@@ -390,6 +428,12 @@ public class Main {
                     findBranchMatches(inputLine, textIdx + 1, branchNodes, bIdx + 1, capturedGroups, endPositions);
                 }
                 findBranchMatches(inputLine, textIdx, branchNodes, bIdx + 1, capturedGroups, endPositions);
+            }
+        } else if (current instanceof BackreferenceNode) {
+            BackreferenceNode bn = (BackreferenceNode) current;
+            String captured = capturedGroups.get(bn.groupNum);
+            if (captured != null && inputLine.startsWith(captured, textIdx)) {
+                findBranchMatches(inputLine, textIdx + captured.length(), branchNodes, bIdx + 1, capturedGroups, endPositions);
             }
         }
     }
