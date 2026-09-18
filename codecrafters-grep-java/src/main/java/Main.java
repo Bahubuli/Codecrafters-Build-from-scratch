@@ -10,11 +10,30 @@ import java.util.Set;
 public class Main {
     public static void main(String[] args) {
         boolean onlyMatching = false;
+        boolean colorAlways = false;
         String pattern = null;
 
         for (int i = 0; i < args.length; i++) {
             if (args[i].equals("-o") || args[i].equals("--only-matching")) {
                 onlyMatching = true;
+            } else if (args[i].equals("--color=always")) {
+                colorAlways = true;
+            } else if (args[i].equals("--color=never")) {
+                colorAlways = false;
+            } else if (args[i].equals("--color=auto")) {
+                colorAlways = false;
+            } else if (args[i].startsWith("--color=")) {
+                String val = args[i].substring("--color=".length());
+                colorAlways = "always".equalsIgnoreCase(val);
+            } else if (args[i].equals("--color")) {
+                if (i + 1 < args.length && (args[i + 1].equals("always") || args[i + 1].equals("never") || args[i + 1].equals("auto"))) {
+                    if (args[i + 1].equals("always")) {
+                        colorAlways = true;
+                    }
+                    i++;
+                } else {
+                    colorAlways = true;
+                }
             } else if (args[i].equals("-E")) {
                 if (i + 1 < args.length) {
                     pattern = args[++i];
@@ -23,7 +42,7 @@ public class Main {
         }
 
         if (pattern == null) {
-            System.out.println("Usage: ./your_program.sh [-o] -E <pattern>");
+            System.out.println("Usage: ./your_program.sh [--color=always] [-o] -E <pattern>");
             System.exit(1);
         }
 
@@ -36,6 +55,20 @@ public class Main {
                 List<String> matches = findAllMatches(line, pattern);
                 for (String match : matches) {
                     System.out.println(match);
+                    matchedAny = true;
+                }
+            } else if (colorAlways) {
+                List<int[]> spans = findMatchSpans(line, pattern);
+                if (!spans.isEmpty()) {
+                    int[] firstSpan = spans.get(0);
+                    int s = firstSpan[0];
+                    int e = firstSpan[1];
+                    String highlighted = line.substring(0, s)
+                            + "\033[01;31m"
+                            + line.substring(s, e)
+                            + "\033[m"
+                            + line.substring(e);
+                    System.out.println(highlighted);
                     matchedAny = true;
                 }
             } else {
@@ -267,16 +300,25 @@ public class Main {
     }
 
     public static boolean matchPattern(String inputLine, String pattern) {
-        return findFirstMatch(inputLine, pattern) != null;
+        return !findMatchSpans(inputLine, pattern).isEmpty();
     }
 
     public static String findFirstMatch(String inputLine, String pattern) {
-        List<String> matches = findAllMatches(inputLine, pattern);
-        return matches.isEmpty() ? null : matches.get(0);
+        List<int[]> spans = findMatchSpans(inputLine, pattern);
+        return spans.isEmpty() ? null : inputLine.substring(spans.get(0)[0], spans.get(0)[1]);
     }
 
     public static List<String> findAllMatches(String inputLine, String pattern) {
+        List<int[]> spans = findMatchSpans(inputLine, pattern);
         List<String> results = new ArrayList<>();
+        for (int[] span : spans) {
+            results.add(inputLine.substring(span[0], span[1]));
+        }
+        return results;
+    }
+
+    public static List<int[]> findMatchSpans(String inputLine, String pattern) {
+        List<int[]> spans = new ArrayList<>();
         boolean anchorStart = false;
         boolean anchorEnd = false;
         String activePattern = pattern;
@@ -295,31 +337,31 @@ public class Main {
 
         if (nodes.isEmpty()) {
             if (anchorEnd && !inputLine.isEmpty()) {
-                return results;
+                return spans;
             }
             if (anchorStart) {
-                results.add("");
-                return results;
+                spans.add(new int[]{0, 0});
+                return spans;
             }
             for (int i = 0; i <= inputLine.length(); i++) {
-                results.add("");
+                spans.add(new int[]{i, i});
             }
-            return results;
+            return spans;
         }
 
         if (anchorStart) {
             int end = matchEndNodesAt(inputLine, 0, nodes, 0, anchorEnd, new HashMap<>());
             if (end != -1) {
-                results.add(inputLine.substring(0, end));
+                spans.add(new int[]{0, end});
             }
-            return results;
+            return spans;
         }
 
         int start = 0;
         while (start <= inputLine.length()) {
             int end = matchEndNodesAt(inputLine, start, nodes, 0, anchorEnd, new HashMap<>());
             if (end != -1) {
-                results.add(inputLine.substring(start, end));
+                spans.add(new int[]{start, end});
                 if (anchorEnd) {
                     break;
                 }
@@ -333,7 +375,7 @@ public class Main {
             }
         }
 
-        return results;
+        return spans;
     }
 
     private static int matchEndNodesAt(
