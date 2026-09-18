@@ -88,12 +88,35 @@ public class Scanner {
             case '\n':
                 line++;
                 break;
+            case '"':
+                string();
+                break;
             default:
                 // Lexical error: unexpected character encountered
                 System.err.println("[line " + line + "] Error: Unexpected character: " + c);
                 hasError = true;
                 break;
         }
+    }
+
+    private void string() {
+        while (peek() != '"' && !isAtEnd()) {
+            if (peek() == '\n') line++;
+            advance();
+        }
+
+        if (isAtEnd()) {
+            System.err.println("[line " + line + "] Error: Unterminated string.");
+            hasError = true;
+            return;
+        }
+
+        // The closing ".
+        advance();
+
+        // Trim the surrounding quotes.
+        String value = source.substring(start + 1, current - 1);
+        addToken(TokenType.STRING, value);
     }
 
     private boolean match(char expected) {
