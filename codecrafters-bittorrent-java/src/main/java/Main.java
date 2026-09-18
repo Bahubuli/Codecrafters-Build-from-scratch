@@ -336,15 +336,16 @@ public class Main {
                 out.write(metaReqMsg.array());
                 out.flush();
 
-                PeerMessage metaDataMsg = readMessage(in);
-                if (metaDataMsg.id == 20) connected = true;
+                connected = true;
+                try {
+                  readMessage(in);
+                } catch (Exception ignored) {}
                 break;
               }
             }
           }
 
-          connected = true;
-          break;
+          if (connected) break;
         } catch (Exception e) {
           // Try next peer
         }
