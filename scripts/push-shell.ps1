@@ -7,10 +7,10 @@ $ErrorActionPreference = "Stop"
 $rootDir = Split-Path -Parent $PSScriptRoot
 $remoteName = if ($env:CODECRAFTERS_SHELL_REMOTE) { $env:CODECRAFTERS_SHELL_REMOTE } else { "shell-codecrafters" }
 
-# Check for uncommitted changes in parent
-$uncommitted = git -C $rootDir status --porcelain
+# Check for uncommitted changes in shell folder
+$uncommitted = git -C $rootDir status --porcelain codecrafters-shell-java
 if ($uncommitted) {
-    Write-Error "Commit or stash changes in the monorepo before submitting to CodeCrafters.`n$(git -C $rootDir status --short)"
+    Write-Error "Commit or stash changes in the shell folder before submitting to CodeCrafters.`n$(git -C $rootDir status --short codecrafters-shell-java)"
     exit 1
 }
 
