@@ -8,7 +8,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 public class Main {
-    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd");
+    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd");
     private static Path currentDir = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
 
     public static void main(String[] args) throws Exception {
@@ -55,6 +55,16 @@ public class Main {
                 }
             } else if (command.equals("pwd")) {
                 System.out.println(currentDir);
+            } else if (command.equals("cd")) {
+                if (parts.length > 1) {
+                    String targetPath = parts[1];
+                    Path target = currentDir.resolve(targetPath).normalize();
+                    if (Files.isDirectory(target)) {
+                        currentDir = target;
+                    } else {
+                        System.out.println("cd: " + targetPath + ": No such file or directory");
+                    }
+                }
             } else {
                 Path executable = findExecutable(command);
                 if (executable != null) {
