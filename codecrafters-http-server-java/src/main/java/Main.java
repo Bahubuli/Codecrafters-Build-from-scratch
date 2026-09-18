@@ -7,17 +7,22 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class Main {
   public static void main(String[] args) {
+    ExecutorService executor = Executors.newCachedThreadPool();
     try (ServerSocket serverSocket = new ServerSocket(4221)) {
       serverSocket.setReuseAddress(true);
       while (true) {
         Socket clientSocket = serverSocket.accept();
-        new Thread(() -> handleClient(clientSocket)).start();
+        executor.submit(() -> handleClient(clientSocket));
       }
     } catch (IOException e) {
       System.err.println("IOException: " + e.getMessage());
+    } finally {
+      executor.shutdown();
     }
   }
 
