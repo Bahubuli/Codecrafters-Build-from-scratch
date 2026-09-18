@@ -43,6 +43,7 @@ public class Main {
 
     private static final List<Job> backgroundJobs = new ArrayList<>();
     private static final List<String> commandHistory = new ArrayList<>();
+    private static int lastAppendedHistoryIndex = 0;
 
     static class ParsedCommand {
         List<String> cmdArgs = new ArrayList<>();
@@ -594,6 +595,20 @@ public class Main {
                                 }
                             }
                         }
+                    } catch (IOException ignored) {}
+                } else if (cmdArgs.size() >= 3 && cmdArgs.get(1).equals("-a")) {
+                    String filePath = cmdArgs.get(2);
+                    try {
+                        Path p = currentDir.resolve(filePath).normalize();
+                        if (p.getParent() != null) {
+                            Files.createDirectories(p.getParent());
+                        }
+                        StringBuilder sb = new StringBuilder();
+                        for (int k = lastAppendedHistoryIndex; k < commandHistory.size(); k++) {
+                            sb.append(commandHistory.get(k)).append("\n");
+                        }
+                        Files.writeString(p, sb.toString(), StandardOpenOption.CREATE, StandardOpenOption.APPEND, StandardOpenOption.WRITE);
+                        lastAppendedHistoryIndex = commandHistory.size();
                     } catch (IOException ignored) {}
                 } else if (cmdArgs.size() >= 3 && cmdArgs.get(1).equals("-w")) {
                     String filePath = cmdArgs.get(2);
