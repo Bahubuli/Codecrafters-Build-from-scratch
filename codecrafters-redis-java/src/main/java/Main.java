@@ -1395,6 +1395,15 @@ public class Main {
       } catch (java.io.IOException e) {
         System.err.println("Failed to create incremental AOF file: " + e.getMessage());
       }
+
+      // Stage 78: Create manifest file
+      java.io.File manifestFile = new java.io.File(aofDir, baseFileName + ".manifest");
+      try {
+        String manifestContent = "file " + baseFileName + ".1.incr.aof seq 1 type i\n";
+        java.nio.file.Files.write(manifestFile.toPath(), manifestContent.getBytes(StandardCharsets.UTF_8));
+      } catch (java.io.IOException e) {
+        System.err.println("Failed to write AOF manifest file: " + e.getMessage());
+      }
     }
 
     try {
