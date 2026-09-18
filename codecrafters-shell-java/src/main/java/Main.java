@@ -56,14 +56,22 @@ public class Main {
             } else if (command.equals("pwd")) {
                 System.out.println(currentDir);
             } else if (command.equals("cd")) {
-                if (parts.length > 1) {
-                    String targetPath = parts[1];
-                    Path target = currentDir.resolve(targetPath).normalize();
-                    if (Files.isDirectory(target)) {
-                        currentDir = target;
-                    } else {
-                        System.out.println("cd: " + targetPath + ": No such file or directory");
-                    }
+                String home = System.getenv("HOME");
+                if (home == null || home.isEmpty()) {
+                    home = System.getProperty("user.home");
+                }
+                String targetPath = parts.length > 1 ? parts[1] : home;
+                if (targetPath.equals("~")) {
+                    targetPath = home;
+                } else if (targetPath.startsWith("~/")) {
+                    targetPath = home + targetPath.substring(1);
+                }
+
+                Path target = currentDir.resolve(targetPath).normalize();
+                if (Files.isDirectory(target)) {
+                    currentDir = target;
+                } else {
+                    System.out.println("cd: " + targetPath + ": No such file or directory");
                 }
             } else {
                 Path executable = findExecutable(command);
