@@ -582,18 +582,33 @@ public class Main {
             err.flush();
         } else if (command.equals("history")) {
             synchronized (commandHistory) {
-                int limit = commandHistory.size();
-                if (cmdArgs.size() > 1) {
+                if (cmdArgs.size() >= 3 && cmdArgs.get(1).equals("-r")) {
+                    String filePath = cmdArgs.get(2);
                     try {
-                        int n = Integer.parseInt(cmdArgs.get(1));
-                        if (n >= 0) {
-                            limit = n;
+                        Path p = currentDir.resolve(filePath).normalize();
+                        if (Files.exists(p)) {
+                            List<String> fileLines = Files.readAllLines(p);
+                            for (String fl : fileLines) {
+                                if (!fl.isEmpty()) {
+                                    commandHistory.add(fl);
+                                }
+                            }
                         }
-                    } catch (NumberFormatException ignored) {}
-                }
-                int startIndex = Math.max(0, commandHistory.size() - limit);
-                for (int i = startIndex; i < commandHistory.size(); i++) {
-                    out.printf("%5d  %s\n", i + 1, commandHistory.get(i));
+                    } catch (IOException ignored) {}
+                } else {
+                    int limit = commandHistory.size();
+                    if (cmdArgs.size() > 1) {
+                        try {
+                            int n = Integer.parseInt(cmdArgs.get(1));
+                            if (n >= 0) {
+                                limit = n;
+                            }
+                        } catch (NumberFormatException ignored) {}
+                    }
+                    int startIndex = Math.max(0, commandHistory.size() - limit);
+                    for (int j = startIndex; j < commandHistory.size(); j++) {
+                        out.printf("%5d  %s\n", j + 1, commandHistory.get(j));
+                    }
                 }
             }
             out.flush();
