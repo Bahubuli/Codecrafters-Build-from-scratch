@@ -1,5 +1,7 @@
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -257,19 +259,30 @@ public class Main {
             } else if (ch == '\t') {
                 String current = line.toString();
                 int lastSpace = current.lastIndexOf(' ');
-                String word;
-                Set<String> matches;
+                String word = "";
+                Set<String> matches = null;
+
                 if (lastSpace == -1) {
                     word = current;
                     matches = getCommandCompletions(word);
                 } else {
                     word = current.substring(lastSpace + 1);
-                    matches = getFileCompletions(word);
+                    String firstWord = current.trim().split("\\s+")[0];
+                    if (COMPLETION_SPECS.containsKey(firstWord)) {
+                        String script = COMPLETION_SPECS.get(firstWord);
+                        List<String> scriptOutput = runCompleterScript(script);
+                        if (!scriptOutput.isEmpty()) {
+                            matches = new TreeSet<>(scriptOutput);
+                        }
+                    }
+                    if (matches == null) {
+                        matches = getFileCompletions(word);
+                    }
                 }
 
                 if (matches.size() == 1) {
                     String match = matches.iterator().next();
-                    String completion = match.substring(word.length());
+                    String completion = match.startsWith(word) ? match.substring(word.length()) : match;
                     if (!match.endsWith("/")) {
                         completion += " ";
                     }
@@ -320,6 +333,26 @@ public class Main {
                 consecutiveTabs = 0;
             }
         }
+    }
+
+    private static List<String> runCompleterScript(String scriptPath) {
+        List<String> results = new ArrayList<>();
+        try {
+            ProcessBuilder pb = new ProcessBuilder(scriptPath);
+            pb.directory(currentDir.toFile());
+            Process p = pb.start();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (!line.isEmpty()) {
+                        results.add(line);
+                    }
+                }
+            }
+            p.waitFor();
+        } catch (Exception ignored) {}
+        return results;
     }
 
     private static Set<String> getFileCompletions(String prefix) {
