@@ -98,13 +98,22 @@ public class Main {
 
             if (BUILTINS.contains(command)) {
                 PrintStream out = System.out;
+                PrintStream err = System.err;
                 boolean closeOut = false;
+                boolean closeErr = false;
                 if (outPath != null) {
                     out = new PrintStream(Files.newOutputStream(outPath,
                             StandardOpenOption.CREATE,
                             appendOut ? StandardOpenOption.APPEND : StandardOpenOption.TRUNCATE_EXISTING,
                             StandardOpenOption.WRITE));
                     closeOut = true;
+                }
+                if (errPath != null) {
+                    err = new PrintStream(Files.newOutputStream(errPath,
+                            StandardOpenOption.CREATE,
+                            appendErr ? StandardOpenOption.APPEND : StandardOpenOption.TRUNCATE_EXISTING,
+                            StandardOpenOption.WRITE));
+                    closeErr = true;
                 }
 
                 try {
@@ -119,6 +128,10 @@ public class Main {
                         if (closeOut) {
                             out.close();
                             closeOut = false;
+                        }
+                        if (closeErr) {
+                            err.close();
+                            closeErr = false;
                         }
                         setRawMode(false);
                         System.exit(exitCode);
@@ -157,14 +170,20 @@ public class Main {
                         if (Files.isDirectory(target)) {
                             currentDir = target;
                         } else {
-                            System.out.println("cd: " + targetPath + ": No such file or directory");
+                            err.println("cd: " + targetPath + ": No such file or directory");
                         }
                     } else if (command.equals("complete")) {
-                        // complete builtin implementation (stubbed for now)
+                        if (cmdArgs.size() >= 3 && cmdArgs.get(1).equals("-p")) {
+                            String target = cmdArgs.get(2);
+                            err.println("complete: " + target + ": no completion specification");
+                        }
                     }
                 } finally {
                     if (closeOut) {
                         out.close();
+                    }
+                    if (closeErr) {
+                        err.close();
                     }
                 }
             } else {
