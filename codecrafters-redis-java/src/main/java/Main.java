@@ -168,6 +168,10 @@ public class Main {
       return tree.headSet(target, false).size();
     }
 
+    synchronized int size() {
+      return dict.size();
+    }
+
     synchronized List<String> range(int start, int stop) {
       int n = tree.size();
       if (n == 0) return Collections.emptyList();
@@ -736,6 +740,17 @@ public class Main {
           appendToAof(parts);
         }
         out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
+      }
+    } else if (command.equalsIgnoreCase("ZCARD")) {
+      if (parts.length < 2) {
+        out.write("-ERR wrong number of arguments for 'zcard' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      } else {
+        String key = parts[1];
+        SortedSet zset = zsetStore.get(key);
+        int card = (zset == null) ? 0 : zset.size();
+        out.write((":" + card + "\r\n").getBytes(StandardCharsets.UTF_8));
+        out.flush();
       }
     } else if (command.equalsIgnoreCase("ZRANGE")) {
       if (parts.length < 4) {
