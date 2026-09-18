@@ -1,7 +1,10 @@
 import java.util.Arrays;
 import java.util.Scanner;
+import java.util.Set;
 
 public class Main {
+    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type");
+
     public static void main(String[] args) throws Exception {
         Scanner scanner = new Scanner(System.in);
 
@@ -30,6 +33,15 @@ public class Main {
             } else if (command.equals("echo")) {
                 String output = String.join(" ", Arrays.copyOfRange(parts, 1, parts.length));
                 System.out.println(output);
+            } else if (command.equals("type")) {
+                if (parts.length > 1) {
+                    String target = parts[1];
+                    if (BUILTINS.contains(target)) {
+                        System.out.println(target + " is a shell builtin");
+                    } else {
+                        System.out.println(target + ": not found");
+                    }
+                }
             } else {
                 System.out.println(input + ": command not found");
             }
