@@ -1,5 +1,6 @@
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -54,6 +55,45 @@ public class Main {
     StreamResult(String key, List<StreamEntry> entries) {
       this.key = key;
       this.entries = entries;
+    }
+  }
+
+  private static class CountingInputStream extends FilterInputStream {
+    private long count = 0;
+
+    CountingInputStream(InputStream in) {
+      super(in);
+    }
+
+    public long getCount() {
+      return count;
+    }
+
+    @Override
+    public int read() throws IOException {
+      int b = in.read();
+      if (b != -1) {
+        count++;
+      }
+      return b;
+    }
+
+    @Override
+    public int read(byte[] b, int off, int len) throws IOException {
+      int n = in.read(b, off, len);
+      if (n > 0) {
+        count += n;
+      }
+      return n;
+    }
+
+    @Override
+    public long skip(long n) throws IOException {
+      long skipped = in.skip(n);
+      if (skipped > 0) {
+        count += skipped;
+      }
+      return skipped;
     }
   }
 
@@ -886,10 +926,11 @@ public class Main {
     }
   }
 
-  private static void processReplicaCommand(String[] parts, OutputStream masterOut, OutputStream nullOut) throws IOException {
+  private static void processReplicaCommand(String[] parts, OutputStream masterOut, OutputStream nullOut, long cmdStartOffset) throws IOException {
     if (parts.length >= 2 && parts[0].equalsIgnoreCase("REPLCONF") && parts[1].equalsIgnoreCase("GETACK")) {
-      // Stage 64: Respond to REPLCONF GETACK * with REPLCONF ACK 0
-      String ack = "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n";
+      // Stage 65: Respond to REPLCONF GETACK * with REPLCONF ACK <cmdStartOffset>
+      String offsetStr = String.valueOf(cmdStartOffset);
+      String ack = "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$" + offsetStr.length() + "\r\n" + offsetStr + "\r\n";
       masterOut.write(ack.getBytes(StandardCharsets.UTF_8));
       masterOut.flush();
     } else {
@@ -1011,10 +1052,12 @@ public class Main {
               System.out.println("Received RDB file: " + rdbBytes.length + " bytes");
             }
 
-            // Stage 63: Enter continuous command processing loop for propagated commands
+            // Stage 63 & 65: Enter continuous command processing loop with offset tracking
+            CountingInputStream countingIn = new CountingInputStream(masterIn);
             OutputStream nullOut = OutputStream.nullOutputStream();
             while (true) {
-              String line = readLine(masterIn);
+              long cmdStartOffset = countingIn.getCount();
+              String line = readLine(countingIn);
               if (line == null) {
                 break; // Master disconnected
               }
@@ -1026,16 +1069,16 @@ public class Main {
                 String[] parts = new String[numArgs];
                 boolean complete = true;
                 for (int i = 0; i < numArgs; i++) {
-                  String lenLine = readLine(masterIn);
+                  String lenLine = readLine(countingIn);
                   if (lenLine == null) {
                     complete = false;
                     break;
                   }
                   int argLen = Integer.parseInt(lenLine.substring(1).trim());
-                  byte[] argBytes = masterIn.readNBytes(argLen);
+                  byte[] argBytes = countingIn.readNBytes(argLen);
                   parts[i] = new String(argBytes, StandardCharsets.UTF_8);
-                  int cr = masterIn.read();
-                  int lf = masterIn.read();
+                  int cr = countingIn.read();
+                  int lf = countingIn.read();
                   if (cr == -1 || lf == -1) {
                     complete = false;
                     break;
@@ -1043,7 +1086,7 @@ public class Main {
                 }
                 if (complete) {
                   try {
-                    processReplicaCommand(parts, masterOut, nullOut);
+                    processReplicaCommand(parts, masterOut, nullOut, cmdStartOffset);
                   } catch (Exception e) {
                     System.err.println("Error processing propagated command: " + e.getMessage());
                   }
@@ -1051,7 +1094,7 @@ public class Main {
               } else {
                 String[] parts = line.split("\\s+");
                 try {
-                  processReplicaCommand(parts, masterOut, nullOut);
+                  processReplicaCommand(parts, masterOut, nullOut, cmdStartOffset);
                 } catch (Exception e) {
                   System.err.println("Error processing inline command: " + e.getMessage());
                 }
