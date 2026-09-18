@@ -116,6 +116,45 @@ public class Main {
                   String response = ":" + newLength + "\r\n";
                   out.write(response.getBytes(StandardCharsets.UTF_8));
                 }
+              } else if (command.equalsIgnoreCase("LRANGE")) {
+                if (parts.length < 4) {
+                  out.write("-ERR wrong number of arguments for 'lrange' command\r\n".getBytes(StandardCharsets.UTF_8));
+                } else {
+                  String key = parts[1];
+                  int start = Integer.parseInt(parts[2]);
+                  int stop = Integer.parseInt(parts[3]);
+
+                  List<String> list = listStore.get(key);
+                  if (list == null) {
+                    out.write("*0\r\n".getBytes(StandardCharsets.UTF_8));
+                  } else {
+                    List<String> elementsToReturn;
+                    synchronized (list) {
+                      if (start >= list.size() || start > stop) {
+                        elementsToReturn = Collections.emptyList();
+                      } else {
+                        int stopIdx = Math.min(stop, list.size() - 1);
+                        if (start > stopIdx) {
+                          elementsToReturn = Collections.emptyList();
+                        } else {
+                          elementsToReturn = new ArrayList<>(list.subList(start, stopIdx + 1));
+                        }
+                      }
+                    }
+
+                    if (elementsToReturn.isEmpty()) {
+                      out.write("*0\r\n".getBytes(StandardCharsets.UTF_8));
+                    } else {
+                      StringBuilder sb = new StringBuilder();
+                      sb.append("*").append(elementsToReturn.size()).append("\r\n");
+                      for (String elem : elementsToReturn) {
+                        byte[] elemBytes = elem.getBytes(StandardCharsets.UTF_8);
+                        sb.append("$").append(elemBytes.length).append("\r\n").append(elem).append("\r\n");
+                      }
+                      out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+                    }
+                  }
+                }
               }
               out.flush();
             }
