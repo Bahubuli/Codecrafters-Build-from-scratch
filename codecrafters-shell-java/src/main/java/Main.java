@@ -271,7 +271,13 @@ public class Main {
                             pb.redirectError(ProcessBuilder.Redirect.INHERIT);
                         }
                         Process process = pb.start();
-                        int jobId = nextJobId.getAndIncrement();
+                        int maxJobId = 0;
+                        for (Job j : backgroundJobs) {
+                            if (j.id > maxJobId) {
+                                maxJobId = j.id;
+                            }
+                        }
+                        int jobId = maxJobId + 1;
                         long pid = process.pid();
                         backgroundJobs.add(new Job(jobId, pid, String.join(" ", cmdArgs), process));
                         System.out.println("[" + jobId + "] " + pid);
