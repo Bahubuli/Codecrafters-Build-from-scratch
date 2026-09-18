@@ -1,3 +1,4 @@
+import java.util.Arrays;
 import java.util.Scanner;
 
 public class Main {
@@ -10,7 +11,11 @@ public class Main {
                 break;
             }
             String input = scanner.nextLine();
-            String[] parts = input.trim().split("\\s+");
+            String trimmed = input.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            String[] parts = trimmed.split("\\s+");
             String command = parts[0];
 
             if (command.equals("exit")) {
@@ -22,9 +27,12 @@ public class Main {
                     }
                 }
                 System.exit(exitCode);
+            } else if (command.equals("echo")) {
+                String output = String.join(" ", Arrays.copyOfRange(parts, 1, parts.length));
+                System.out.println(output);
+            } else {
+                System.out.println(input + ": command not found");
             }
-
-            System.out.println(input + ": command not found");
         }
     }
 }

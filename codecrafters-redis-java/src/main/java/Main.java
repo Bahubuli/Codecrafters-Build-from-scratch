@@ -115,6 +115,8 @@ public class Main {
   private static String masterHost = null;
   private static int masterPort = -1;
   private static Socket masterSocket = null;
+  private static String rdbDir = "";
+  private static String rdbDbFilename = "";
 
   private static String masterReplId = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
   private static volatile long masterReplOffset = 0;
@@ -1018,6 +1020,44 @@ public class Main {
       int ackedCount = countAcknowledgedReplicas(targetOffset);
       out.write((":" + ackedCount + "\r\n").getBytes(StandardCharsets.UTF_8));
       out.flush();
+    } else if (command.equalsIgnoreCase("CONFIG")) {
+      // Stage 69: CONFIG GET dir / dbfilename
+      if (parts.length >= 3 && parts[1].equalsIgnoreCase("GET")) {
+        String param = parts[2].toLowerCase();
+        String value;
+        String paramName;
+        if (param.equals("dir")) {
+          paramName = "dir";
+          value = rdbDir;
+        } else if (param.equals("dbfilename")) {
+          paramName = "dbfilename";
+          value = rdbDbFilename;
+        } else {
+          out.write("*0\r\n".getBytes(StandardCharsets.UTF_8));
+          return;
+        }
+        byte[] nameBytes = paramName.getBytes(StandardCharsets.UTF_8);
+        byte[] valBytes = value.getBytes(StandardCharsets.UTF_8);
+        String response = "*2\r\n$" + nameBytes.length + "\r\n" + paramName + "\r\n$" + valBytes.length + "\r\n" + value + "\r\n";
+        out.write(response.getBytes(StandardCharsets.UTF_8));
+      } else {
+        out.write("-ERR syntax error\r\n".getBytes(StandardCharsets.UTF_8));
+      }
+    } else if (command.equalsIgnoreCase("KEYS")) {
+      // Stage 70/72: KEYS * returns all non-expired keys from the store
+      List<String> keys = new ArrayList<>();
+      for (Map.Entry<String, Entry> e : store.entrySet()) {
+        if (!e.getValue().isExpired()) {
+          keys.add(e.getKey());
+        }
+      }
+      StringBuilder sb = new StringBuilder();
+      sb.append("*").append(keys.size()).append("\r\n");
+      for (String k : keys) {
+        byte[] kb = k.getBytes(StandardCharsets.UTF_8);
+        sb.append("$").append(kb.length).append("\r\n").append(k).append("\r\n");
+      }
+      out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
     }
   }
 
@@ -1030,6 +1070,119 @@ public class Main {
       masterOut.flush();
     } else {
       handleCommand(parts, nullOut);
+    }
+  }
+
+  private static long readSizeEncoded(InputStream in) throws IOException {
+    int b = in.read();
+    if (b == -1) throw new IOException("Unexpected EOF in size encoding");
+    int type = (b & 0xC0) >> 6;
+    if (type == 0) return b & 0x3F;
+    if (type == 1) {
+      int b2 = in.read();
+      return ((b & 0x3F) << 8) | b2;
+    }
+    if (type == 2) {
+      long val = 0;
+      for (int i = 0; i < 4; i++) val = (val << 8) | in.read();
+      return val;
+    }
+    // type == 3: special integer encoding
+    int sub = b & 0x3F;
+    if (sub == 0) return in.read();
+    if (sub == 1) { int lo = in.read(); int hi = in.read(); return lo | (hi << 8); }
+    if (sub == 2) { long v = 0; for (int i = 0; i < 4; i++) v = v | (((long) in.read()) << (i * 8)); return v; }
+    throw new IOException("Unsupported RDB special encoding: " + sub);
+  }
+
+  private static String readRdbString(InputStream in) throws IOException {
+    int b = in.read();
+    if (b == -1) throw new IOException("Unexpected EOF in string read");
+    int type = (b & 0xC0) >> 6;
+    if (type == 3) {
+      int sub = b & 0x3F;
+      long val;
+      if (sub == 0) val = in.read();
+      else if (sub == 1) { int lo = in.read(); int hi = in.read(); val = lo | (hi << 8); }
+      else if (sub == 2) { long v = 0; for (int i = 0; i < 4; i++) v = v | (((long) in.read()) << (i * 8)); val = v; }
+      else throw new IOException("Unsupported RDB integer encoding: " + sub);
+      return String.valueOf(val);
+    }
+    int len;
+    if (type == 0) len = b & 0x3F;
+    else if (type == 1) { int b2 = in.read(); len = ((b & 0x3F) << 8) | b2; }
+    else { len = 0; for (int i = 0; i < 4; i++) len = (len << 8) | in.read(); }
+    byte[] bytes = in.readNBytes(len);
+    return new String(bytes, StandardCharsets.UTF_8);
+  }
+
+  private static void loadRdb() {
+    if (rdbDir.isEmpty() || rdbDbFilename.isEmpty()) return;
+    java.io.File rdbFile = new java.io.File(rdbDir, rdbDbFilename);
+    if (!rdbFile.exists()) {
+      System.out.println("RDB file not found: " + rdbFile.getAbsolutePath());
+      return;
+    }
+    try (InputStream in = new java.io.FileInputStream(rdbFile)) {
+      // Skip 9-byte header: "REDIS" + 4-char version (e.g. "0011")
+      byte[] header = in.readNBytes(9);
+      System.out.println("RDB header: " + new String(header, StandardCharsets.UTF_8));
+
+      while (true) {
+        int opcode = in.read();
+        if (opcode == -1) break;
+
+        if (opcode == 0xFA) {
+          // Auxiliary field: key + value strings — skip both
+          readRdbString(in);
+          readRdbString(in);
+        } else if (opcode == 0xFE) {
+          // SELECTDB: size-encoded DB index — skip
+          readSizeEncoded(in);
+        } else if (opcode == 0xFB) {
+          // RESIZEDB: two size-encoded ints (hashtable sizes) — skip
+          readSizeEncoded(in);
+          readSizeEncoded(in);
+        } else if (opcode == 0xFF) {
+          // EOF marker — done (followed by 8-byte CRC64, but we stop here)
+          break;
+        } else if (opcode == 0xFC) {
+          // Expiry in milliseconds (8-byte little-endian)
+          long expiresAt = 0;
+          for (int i = 0; i < 8; i++) expiresAt |= ((long) in.read()) << (i * 8);
+          int valueType = in.read();
+          String key = readRdbString(in);
+          String value = readRdbString(in);
+          Long expiry = (expiresAt > System.currentTimeMillis()) ? expiresAt : null;
+          if (expiresAt <= System.currentTimeMillis()) {
+            // Already expired — don't load
+          } else {
+            store.put(key, new Entry(value, expiresAt));
+          }
+        } else if (opcode == 0xFD) {
+          // Expiry in seconds (4-byte little-endian)
+          long expirySec = 0;
+          for (int i = 0; i < 4; i++) expirySec |= ((long) in.read()) << (i * 8);
+          long expiresAt = expirySec * 1000L;
+          int valueType = in.read();
+          String key = readRdbString(in);
+          String value = readRdbString(in);
+          if (expiresAt <= System.currentTimeMillis()) {
+            // Already expired — don't load
+          } else {
+            store.put(key, new Entry(value, expiresAt));
+          }
+        } else {
+          // The opcode byte IS the value type (e.g., 0x00 = string)
+          int valueType = opcode;
+          String key = readRdbString(in);
+          String value = readRdbString(in);
+          store.put(key, new Entry(value, null));
+        }
+      }
+      System.out.println("RDB loaded: " + store.size() + " keys");
+    } catch (IOException e) {
+      System.err.println("Failed to load RDB file: " + e.getMessage());
     }
   }
 
@@ -1070,8 +1223,17 @@ public class Main {
           masterHost = nextArg;
           i++;
         }
+      } else if ("--dir".equalsIgnoreCase(args[i]) && i + 1 < args.length) {
+        rdbDir = args[i + 1];
+        i++;
+      } else if ("--dbfilename".equalsIgnoreCase(args[i]) && i + 1 < args.length) {
+        rdbDbFilename = args[i + 1];
+        i++;
       }
     }
+
+    // Stage 70: Load RDB file at startup
+    loadRdb();
 
     try {
       ServerSocket serverSocket = new ServerSocket(port);
