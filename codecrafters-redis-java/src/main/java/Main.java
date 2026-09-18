@@ -106,6 +106,8 @@ public class Main {
     volatile boolean dirtyCas = false;
     final Set<String> subscribedChannels = ConcurrentHashMap.newKeySet();
     OutputStream out;
+    boolean authenticated = true;
+    String authUser = "default";
   }
 
   static class AclUser {
@@ -708,6 +710,10 @@ public class Main {
   }
 
   private static void handleCommand(String[] parts, OutputStream out) throws IOException {
+    handleCommand(parts, out, null);
+  }
+
+  private static void handleCommand(String[] parts, OutputStream out, ClientContext clientCtx) throws IOException {
     String command = parts[0];
 
     if (command.equalsIgnoreCase("PUBLISH")) {
@@ -1083,7 +1089,8 @@ public class Main {
       }
     } else if (command.equalsIgnoreCase("ACL")) {
       if (parts.length >= 2 && parts[1].equalsIgnoreCase("WHOAMI")) {
-        out.write("$7\r\ndefault\r\n".getBytes(StandardCharsets.UTF_8));
+        String who = (clientCtx != null && clientCtx.authUser != null) ? clientCtx.authUser : "default";
+        out.write(("$" + who.length() + "\r\n" + who + "\r\n").getBytes(StandardCharsets.UTF_8));
         out.flush();
       } else if (parts.length >= 3 && parts[1].equalsIgnoreCase("GETUSER")) {
         String username = parts[2];
@@ -1152,6 +1159,10 @@ public class Main {
       }
 
       if (user.nopass) {
+        if (clientCtx != null) {
+          clientCtx.authenticated = true;
+          clientCtx.authUser = username;
+        }
         out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
         out.flush();
         return;
@@ -1159,6 +1170,10 @@ public class Main {
 
       String hash = sha256Hex(password);
       if (user.passwords.contains(hash)) {
+        if (clientCtx != null) {
+          clientCtx.authenticated = true;
+          clientCtx.authUser = username;
+        }
         out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
       } else {
         out.write("-WRONGPASS invalid username-password pair or user is disabled.\r\n".getBytes(StandardCharsets.UTF_8));
@@ -2411,6 +2426,14 @@ public class Main {
 
         new Thread(() -> {
           ClientContext clientCtx = new ClientContext();
+          AclUser defUser = aclUsers.get("default");
+          if (defUser != null && defUser.nopass) {
+            clientCtx.authenticated = true;
+            clientCtx.authUser = "default";
+          } else {
+            clientCtx.authenticated = false;
+            clientCtx.authUser = null;
+          }
           OutputStream out = null;
           try {
             out = clientSocket.getOutputStream();
@@ -2450,6 +2473,14 @@ public class Main {
                 out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
                 out.flush();
                 break;
+              }
+
+              if (!clientCtx.authenticated) {
+                if (!command.equalsIgnoreCase("AUTH")) {
+                  out.write("-NOAUTH Authentication required.\r\n".getBytes(StandardCharsets.UTF_8));
+                  out.flush();
+                  continue;
+                }
               }
 
               if (!clientCtx.subscribedChannels.isEmpty()) {
@@ -2605,7 +2636,7 @@ public class Main {
                   }
                 }
               } else {
-                handleCommand(parts, out);
+                handleCommand(parts, out, clientCtx);
                 out.flush();
               }
             }
