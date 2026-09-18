@@ -80,29 +80,48 @@ public class Main {
         }
     }
 
-    static List<Token> parseTokens(String pattern) {
-        List<Token> tokens = new ArrayList<>();
+    enum Quantifier {
+        EXACTLY_ONE,
+        ONE_OR_MORE
+    }
+
+    static class PatternElement {
+        final Token token;
+        final Quantifier quantifier;
+
+        PatternElement(Token token, Quantifier quantifier) {
+            this.token = token;
+            this.quantifier = quantifier;
+        }
+    }
+
+    static List<PatternElement> parsePatternElements(String pattern) {
+        List<Token> rawTokens = new ArrayList<>();
+        List<Boolean> hasPlus = new ArrayList<>();
+
         int i = 0;
         while (i < pattern.length()) {
             char c = pattern.charAt(i);
+            Token currentToken = null;
+
             if (c == '\\') {
                 if (i + 1 < pattern.length()) {
                     char next = pattern.charAt(i + 1);
                     if (next == 'd') {
-                        tokens.add(new DigitToken());
+                        currentToken = new DigitToken();
                         i += 2;
                     } else if (next == 'w') {
-                        tokens.add(new WordToken());
+                        currentToken = new WordToken();
                         i += 2;
                     } else if (next == '\\') {
-                        tokens.add(new LiteralToken('\\'));
+                        currentToken = new LiteralToken('\\');
                         i += 2;
                     } else {
-                        tokens.add(new LiteralToken(next));
+                        currentToken = new LiteralToken(next);
                         i += 2;
                     }
                 } else {
-                    tokens.add(new LiteralToken('\\'));
+                    currentToken = new LiteralToken('\\');
                     i++;
                 }
             } else if (c == '[') {
@@ -110,22 +129,39 @@ public class Main {
                 if (closing != -1) {
                     if (i + 1 < pattern.length() && pattern.charAt(i + 1) == '^') {
                         String groupChars = pattern.substring(i + 2, closing);
-                        tokens.add(new NegativeGroupToken(groupChars));
+                        currentToken = new NegativeGroupToken(groupChars);
                     } else {
                         String groupChars = pattern.substring(i + 1, closing);
-                        tokens.add(new PositiveGroupToken(groupChars));
+                        currentToken = new PositiveGroupToken(groupChars);
                     }
                     i = closing + 1;
                 } else {
-                    tokens.add(new LiteralToken(c));
+                    currentToken = new LiteralToken(c);
                     i++;
                 }
             } else {
-                tokens.add(new LiteralToken(c));
+                currentToken = new LiteralToken(c);
                 i++;
             }
+
+            boolean plus = false;
+            if (i < pattern.length() && pattern.charAt(i) == '+') {
+                plus = true;
+                i++;
+            }
+
+            rawTokens.add(currentToken);
+            hasPlus.add(plus);
         }
-        return tokens;
+
+        List<PatternElement> elements = new ArrayList<>();
+        for (int j = 0; j < rawTokens.size(); j++) {
+            elements.add(new PatternElement(
+                rawTokens.get(j),
+                hasPlus.get(j) ? Quantifier.ONE_OR_MORE : Quantifier.EXACTLY_ONE
+            ));
+        }
+        return elements;
     }
 
     public static boolean matchPattern(String inputLine, String pattern) {
@@ -142,38 +178,56 @@ public class Main {
             activePattern = activePattern.substring(0, activePattern.length() - 1);
         }
 
-        List<Token> tokens = parseTokens(activePattern);
+        List<PatternElement> elements = parsePatternElements(activePattern);
 
-        if (tokens.isEmpty()) {
+        if (elements.isEmpty()) {
             return !anchorEnd || inputLine.isEmpty();
         }
 
         if (anchorStart) {
-            return matchesAt(inputLine, 0, tokens, 0, anchorEnd);
+            return matchesAt(inputLine, 0, elements, 0, anchorEnd);
         }
 
         for (int start = 0; start <= inputLine.length(); start++) {
-            if (matchesAt(inputLine, start, tokens, 0, anchorEnd)) {
+            if (matchesAt(inputLine, start, elements, 0, anchorEnd)) {
                 return true;
             }
         }
         return false;
     }
 
-    private static boolean matchesAt(String inputLine, int textIdx, List<Token> tokens, int tokenIdx, boolean anchorEnd) {
-        if (tokenIdx == tokens.size()) {
+    private static boolean matchesAt(String inputLine, int textIdx, List<PatternElement> elements, int elemIdx, boolean anchorEnd) {
+        if (elemIdx == elements.size()) {
             if (anchorEnd) {
                 return textIdx == inputLine.length();
             }
             return true;
         }
-        if (textIdx == inputLine.length()) {
-            return false;
-        }
 
-        Token currentToken = tokens.get(tokenIdx);
-        if (currentToken.matches(inputLine.charAt(textIdx))) {
-            return matchesAt(inputLine, textIdx + 1, tokens, tokenIdx + 1, anchorEnd);
+        PatternElement current = elements.get(elemIdx);
+
+        if (current.quantifier == Quantifier.EXACTLY_ONE) {
+            if (textIdx < inputLine.length() && current.token.matches(inputLine.charAt(textIdx))) {
+                return matchesAt(inputLine, textIdx + 1, elements, elemIdx + 1, anchorEnd);
+            }
+            return false;
+        } else if (current.quantifier == Quantifier.ONE_OR_MORE) {
+            // Must match at least one
+            if (textIdx >= inputLine.length() || !current.token.matches(inputLine.charAt(textIdx))) {
+                return false;
+            }
+            // Count how many consecutive characters can match
+            int maxMatch = textIdx;
+            while (maxMatch < inputLine.length() && current.token.matches(inputLine.charAt(maxMatch))) {
+                maxMatch++;
+            }
+            // Greedy backtracking: try longest match down to 1 match
+            for (int end = maxMatch; end >= textIdx + 1; end--) {
+                if (matchesAt(inputLine, end, elements, elemIdx + 1, anchorEnd)) {
+                    return true;
+                }
+            }
+            return false;
         }
         return false;
     }
