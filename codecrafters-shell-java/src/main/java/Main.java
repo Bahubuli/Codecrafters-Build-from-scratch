@@ -289,18 +289,40 @@ public class Main {
 
     private static Set<String> getFileCompletions(String prefix) {
         Set<String> candidates = new TreeSet<>();
-        File[] files = currentDir.toFile().listFiles();
+        Path targetDir;
+        String dirPart = "";
+        String namePrefix = prefix;
+        int lastSlash = prefix.lastIndexOf('/');
+        if (lastSlash != -1) {
+            dirPart = prefix.substring(0, lastSlash + 1);
+            namePrefix = prefix.substring(lastSlash + 1);
+            String searchPath = dirPart;
+            if (searchPath.equals("~") || searchPath.startsWith("~/")) {
+                String home = System.getenv("HOME");
+                if (home == null || home.isEmpty()) {
+                    home = System.getProperty("user.home");
+                }
+                searchPath = home + searchPath.substring(1);
+            }
+            if (searchPath.startsWith("/")) {
+                targetDir = Paths.get(searchPath).normalize();
+            } else {
+                targetDir = currentDir.resolve(searchPath).normalize();
+            }
+        } else {
+            targetDir = currentDir;
+        }
+
+        File[] files = targetDir.toFile().listFiles();
         if (files != null) {
             for (File file : files) {
                 try {
-                    if (file.isFile()) {
-                        String name = file.getName();
-                        if (!prefix.startsWith(".") && name.startsWith(".")) {
-                            continue;
-                        }
-                        if (name.startsWith(prefix)) {
-                            candidates.add(name);
-                        }
+                    String name = file.getName();
+                    if (!namePrefix.startsWith(".") && name.startsWith(".")) {
+                        continue;
+                    }
+                    if (name.startsWith(namePrefix)) {
+                        candidates.add(dirPart + name);
                     }
                 } catch (Exception ignored) {}
             }
