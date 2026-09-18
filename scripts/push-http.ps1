@@ -7,9 +7,9 @@ $ErrorActionPreference = "Stop"
 $rootDir = Split-Path -Parent $PSScriptRoot
 $remoteName = if ($env:CODECRAFTERS_HTTP_REMOTE) { $env:CODECRAFTERS_HTTP_REMOTE } else { "http-codecrafters" }
 
-$uncommitted = git -C $rootDir status --porcelain
+$uncommitted = git -C $rootDir status --porcelain -- codecrafters-http-server-java
 if ($uncommitted) {
-    Write-Error "Commit or stash changes in the monorepo before submitting to CodeCrafters.`n$(git -C $rootDir status --short)"
+    Write-Error "Commit or stash changes in codecrafters-http-server-java before submitting to CodeCrafters.`n$(git -C $rootDir status --short -- codecrafters-http-server-java)"
     exit 1
 }
 
@@ -28,31 +28,28 @@ try {
 
     $sourceDir = Join-Path $rootDir "codecrafters-http-server-java"
     Get-ChildItem -Path $sourceDir -Recurse | ForEach-Object {
-        $relativePath = $_.FullName.Substring($sourceDir.Length + 1)
-        $targetPath = Join-Path "$tempDir/http" $relativePath
+        $relPath = $_.FullName.Substring($sourceDir.Length + 1)
+        if ($relPath -like "target*" -or $relPath -like ".idea*") { return }
+
+        $dest = Join-Path "$tempDir/http" $relPath
         if ($_.PSIsContainer) {
-            if (-not (Test-Path $targetPath)) {
-                New-Item -ItemType Directory -Path $targetPath | Out-Null
-            }
+            if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest | Out-Null }
         } else {
-            Copy-Item -Path $_.FullName -Destination $targetPath -Force
+            $destDir = Split-Path -Parent $dest
+            if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir | Out-Null }
+            Copy-Item $_.FullName -Destination $dest -Force
         }
     }
 
-    $diff = git -C "$tempDir/http" status --porcelain
-    if (-not $diff) {
-        Write-Host "No HTTP server changes to submit to CodeCrafters."
-        exit 0
-    }
-
     git -C "$tempDir/http" add -A
-    git -C "$tempDir/http" commit -m $CommitMessage
-    git -C "$tempDir/http" push origin master
-    Write-Host "Successfully submitted to CodeCrafters!" -ForegroundColor Green
-}
-finally {
-    [System.GC]::Collect()
-    [System.GC]::WaitForPendingFinalizers()
-    Start-Sleep -Milliseconds 500
+    $st = git -C "$tempDir/http" status --porcelain
+    if ($st) {
+        git -C "$tempDir/http" commit -m $CommitMessage
+        git -C "$tempDir/http" push origin master
+        Write-Host "Successfully submitted to CodeCrafters!"
+    } else {
+        Write-Host "No changes detected to submit."
+    }
+} finally {
     Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
 }
