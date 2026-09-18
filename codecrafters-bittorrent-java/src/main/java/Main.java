@@ -337,9 +337,12 @@ public class Main {
                 out.flush();
 
                 connected = true;
-                try {
-                  readMessage(in);
-                } catch (Exception ignored) {}
+                while (true) {
+                  PeerMessage dataResp = readMessage(in);
+                  if (dataResp.id == 20) {
+                    break;
+                  }
+                }
                 break;
               }
             }
