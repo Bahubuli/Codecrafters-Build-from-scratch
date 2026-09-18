@@ -180,6 +180,36 @@ public class Main {
                   }
                   out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
                 }
+              } else if (command.equalsIgnoreCase("INCR")) {
+                if (parts.length < 2) {
+                  out.write("-ERR wrong number of arguments for 'incr' command\r\n".getBytes(StandardCharsets.UTF_8));
+                } else {
+                  String key = parts[1];
+                  final long[] resultVal = new long[1];
+                  final boolean[] isNaN = new boolean[1];
+
+                  store.compute(key, (k, old) -> {
+                    if (old == null || old.isExpired()) {
+                      resultVal[0] = 1;
+                      return new Entry("1", null);
+                    }
+                    try {
+                      long current = Long.parseLong(old.value);
+                      resultVal[0] = current + 1;
+                      return new Entry(String.valueOf(resultVal[0]), old.expiresAt);
+                    } catch (NumberFormatException e) {
+                      isNaN[0] = true;
+                      return old;
+                    }
+                  });
+
+                  if (isNaN[0]) {
+                    out.write("-ERR value is not an integer or out of range\r\n".getBytes(StandardCharsets.UTF_8));
+                  } else {
+                    out.write((":" + resultVal[0] + "\r\n").getBytes(StandardCharsets.UTF_8));
+                  }
+                  out.flush();
+                }
               } else if (command.equalsIgnoreCase("TYPE")) {
                 if (parts.length < 2) {
                   out.write("-ERR wrong number of arguments for 'type' command\r\n".getBytes(StandardCharsets.UTF_8));
