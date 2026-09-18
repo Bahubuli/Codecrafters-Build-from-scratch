@@ -52,6 +52,13 @@ public class Main {
         }
     }
 
+    static class WildcardToken implements Token {
+        @Override
+        public boolean matches(char c) {
+            return c != '\n';
+        }
+    }
+
     static class PositiveGroupToken implements Token {
         private final Set<Character> chars;
         public PositiveGroupToken(String characters) {
@@ -125,6 +132,9 @@ public class Main {
                     currentToken = new LiteralToken('\\');
                     i++;
                 }
+            } else if (c == '.') {
+                currentToken = new WildcardToken();
+                i++;
             } else if (c == '[') {
                 int closing = pattern.indexOf(']', i + 1);
                 if (closing != -1) {
@@ -230,13 +240,11 @@ public class Main {
             }
             return false;
         } else if (current.quantifier == Quantifier.ZERO_OR_ONE) {
-            // Greedy: first attempt matching 1 character if possible
             if (textIdx < inputLine.length() && current.token.matches(inputLine.charAt(textIdx))) {
                 if (matchesAt(inputLine, textIdx + 1, elements, elemIdx + 1, anchorEnd)) {
                     return true;
                 }
             }
-            // Backtrack / fall through: attempt matching 0 characters
             return matchesAt(inputLine, textIdx, elements, elemIdx + 1, anchorEnd);
         }
         return false;
