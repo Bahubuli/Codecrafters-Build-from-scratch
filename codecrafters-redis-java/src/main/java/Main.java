@@ -895,6 +895,27 @@ public class Main {
         }
         out.flush();
       }
+    } else if (command.equalsIgnoreCase("GEOPOS")) {
+      if (parts.length < 3) {
+        out.write("-ERR wrong number of arguments for 'geopos' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      } else {
+        String key = parts[1];
+        SortedSet zset = zsetStore.get(key);
+        StringBuilder sb = new StringBuilder();
+        int count = parts.length - 2;
+        sb.append("*").append(count).append("\r\n");
+        for (int i = 2; i < parts.length; i++) {
+          String member = parts[i];
+          if (zset != null && zset.getScore(member) != null) {
+            sb.append("*2\r\n$1\r\n0\r\n$1\r\n0\r\n");
+          } else {
+            sb.append("*-1\r\n");
+          }
+        }
+        out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      }
     } else if (command.equalsIgnoreCase("ZRANGE")) {
       if (parts.length < 4) {
         out.write("-ERR wrong number of arguments for 'zrange' command\r\n".getBytes(StandardCharsets.UTF_8));
