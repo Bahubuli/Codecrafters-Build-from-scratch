@@ -41,10 +41,19 @@ public class Main {
         }
     }
 
+    static class WordToken implements Token {
+        @Override
+        public boolean matches(char c) {
+            return Character.isLetterOrDigit(c) || c == '_';
+        }
+    }
+
     public static boolean matchPattern(String inputLine, String pattern) {
         Token token;
         if (pattern.equals("\\d")) {
             token = new DigitToken();
+        } else if (pattern.equals("\\w")) {
+            token = new WordToken();
         } else if (pattern.length() == 1) {
             token = new LiteralToken(pattern.charAt(0));
         } else {
