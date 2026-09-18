@@ -48,7 +48,7 @@ public class DnsMessage {
     }
 
     public byte[] toBytes() {
-        ByteBuffer buffer = ByteBuffer.allocate(512);
+        ByteBuffer buffer = ByteBuffer.allocate(4096);
         if (header != null) {
             header.setQdCount(questions != null ? questions.size() : 0);
             header.setAnCount(answers != null ? answers.size() : 0);
