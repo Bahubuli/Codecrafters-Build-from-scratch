@@ -130,32 +130,41 @@ public class Main {
 
     public static boolean matchPattern(String inputLine, String pattern) {
         boolean anchorStart = false;
+        boolean anchorEnd = false;
         String activePattern = pattern;
-        if (pattern.startsWith("^")) {
+
+        if (activePattern.startsWith("^")) {
             anchorStart = true;
-            activePattern = pattern.substring(1);
+            activePattern = activePattern.substring(1);
+        }
+        if (activePattern.endsWith("$")) {
+            anchorEnd = true;
+            activePattern = activePattern.substring(0, activePattern.length() - 1);
         }
 
         List<Token> tokens = parseTokens(activePattern);
 
         if (tokens.isEmpty()) {
-            return true;
+            return !anchorEnd || inputLine.isEmpty();
         }
 
         if (anchorStart) {
-            return matchesAt(inputLine, 0, tokens, 0);
+            return matchesAt(inputLine, 0, tokens, 0, anchorEnd);
         }
 
         for (int start = 0; start <= inputLine.length(); start++) {
-            if (matchesAt(inputLine, start, tokens, 0)) {
+            if (matchesAt(inputLine, start, tokens, 0, anchorEnd)) {
                 return true;
             }
         }
         return false;
     }
 
-    private static boolean matchesAt(String inputLine, int textIdx, List<Token> tokens, int tokenIdx) {
+    private static boolean matchesAt(String inputLine, int textIdx, List<Token> tokens, int tokenIdx, boolean anchorEnd) {
         if (tokenIdx == tokens.size()) {
+            if (anchorEnd) {
+                return textIdx == inputLine.length();
+            }
             return true;
         }
         if (textIdx == inputLine.length()) {
@@ -164,7 +173,7 @@ public class Main {
 
         Token currentToken = tokens.get(tokenIdx);
         if (currentToken.matches(inputLine.charAt(textIdx))) {
-            return matchesAt(inputLine, textIdx + 1, tokens, tokenIdx + 1);
+            return matchesAt(inputLine, textIdx + 1, tokens, tokenIdx + 1, anchorEnd);
         }
         return false;
     }
