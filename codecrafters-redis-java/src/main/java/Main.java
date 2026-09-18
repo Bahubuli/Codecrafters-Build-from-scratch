@@ -830,8 +830,14 @@ public class Main {
         if (!valid) {
           out.write(errorMsg.getBytes(StandardCharsets.UTF_8));
         } else {
-          int count = (parts.length - 2) / 3;
-          out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
+          String key = parts[1];
+          SortedSet zset = zsetStore.computeIfAbsent(key, k -> new SortedSet());
+          int added = 0;
+          for (int i = 2; i < parts.length; i += 3) {
+            String member = parts[i + 2];
+            added += zset.add(0.0, member);
+          }
+          out.write((":" + added + "\r\n").getBytes(StandardCharsets.UTF_8));
         }
         out.flush();
       }
