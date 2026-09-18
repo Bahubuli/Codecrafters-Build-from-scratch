@@ -1021,6 +1021,7 @@ public class Main {
         out.flush();
         return;
       }
+      // Stage 123: BITOP OR
       String op = parts[1].toUpperCase();
       String destKey = stripQuotes(parts[2]);
       
