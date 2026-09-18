@@ -506,7 +506,18 @@ public class Main {
   private static void handleCommand(String[] parts, OutputStream out) throws IOException {
     String command = parts[0];
 
-    if (command.equalsIgnoreCase("PING")) {
+    if (command.equalsIgnoreCase("PUBLISH")) {
+      if (parts.length < 3) {
+        out.write("-ERR wrong number of arguments for 'publish' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      } else {
+        String channel = parts[1];
+        Set<ClientContext> subs = channelSubscribers.get(channel);
+        int count = (subs != null) ? subs.size() : 0;
+        out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      }
+    } else if (command.equalsIgnoreCase("PING")) {
       out.write("+PONG\r\n".getBytes(StandardCharsets.UTF_8));
     } else if (command.equalsIgnoreCase("ECHO")) {
       String arg = parts[1];
