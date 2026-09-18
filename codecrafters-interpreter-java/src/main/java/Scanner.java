@@ -60,6 +60,9 @@ public class Scanner {
             case '*':
                 addToken(TokenType.STAR);
                 break;
+            case '=':
+                addToken(match('=') ? TokenType.EQUAL_EQUAL : TokenType.EQUAL);
+                break;
             case ' ':
             case '\r':
             case '\t':
@@ -73,6 +76,14 @@ public class Scanner {
                 hasError = true;
                 break;
         }
+    }
+
+    private boolean match(char expected) {
+        if (isAtEnd()) return false;
+        if (source.charAt(current) != expected) return false;
+
+        current++;
+        return true;
     }
 
     private boolean isAtEnd() {
