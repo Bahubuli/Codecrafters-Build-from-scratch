@@ -19,6 +19,7 @@ public class Main {
         String inputLine = scanner.nextLine();
 
         if (matchPattern(inputLine, pattern)) {
+            System.out.println(inputLine);
             System.exit(0);
         } else {
             System.exit(1);
