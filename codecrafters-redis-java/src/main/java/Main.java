@@ -7,6 +7,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,6 +17,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -75,6 +77,9 @@ public class Main {
 
   private static String masterReplId = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
   private static long masterReplOffset = 0;
+  private static final String EMPTY_RDB_BASE64 =
+      "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==";
+  private static final List<OutputStream> replicas = new CopyOnWriteArrayList<>();
 
   private static String getInfoReplication() {
     if ("master".equalsIgnoreCase(role)) {
@@ -807,6 +812,18 @@ public class Main {
       // Stage 59: Replication handshake - master responds +FULLRESYNC <masterReplId> 0\r\n
       String response = "+FULLRESYNC " + masterReplId + " 0\r\n";
       out.write(response.getBytes(StandardCharsets.UTF_8));
+
+      // Stage 60: Empty RDB transfer - send snapshot formatted as $<length>\r\n<bytes> (no trailing \r\n)
+      byte[] rdbBytes = Base64.getDecoder().decode(EMPTY_RDB_BASE64);
+      String rdbHeader = "$" + rdbBytes.length + "\r\n";
+      out.write(rdbHeader.getBytes(StandardCharsets.UTF_8));
+      out.write(rdbBytes);
+      out.flush();
+
+      // Track replica connection for subsequent command propagation
+      if (!replicas.contains(out)) {
+        replicas.add(out);
+      }
     } else if (command.equalsIgnoreCase("INFO")) {
       String info = getInfoReplication();
       byte[] bytes = info.getBytes(StandardCharsets.UTF_8);
@@ -931,8 +948,9 @@ public class Main {
 
         new Thread(() -> {
           ClientContext clientCtx = new ClientContext();
+          OutputStream out = null;
           try {
-            OutputStream out = clientSocket.getOutputStream();
+            out = clientSocket.getOutputStream();
             InputStream in = clientSocket.getInputStream();
             BufferedReader reader = new BufferedReader(new InputStreamReader(in));
             boolean[] inTx = new boolean[]{false};
@@ -1034,6 +1052,9 @@ public class Main {
           } catch (IOException e) {
             System.out.println("IOException: " + e.getMessage());
           } finally {
+            if (out != null) {
+              replicas.remove(out);
+            }
             unwatchAll(clientCtx);
             try {
               clientSocket.close();
