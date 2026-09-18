@@ -225,6 +225,7 @@ public class Main {
                         }
                     } else if (command.equals("jobs")) {
                         int n = backgroundJobs.size();
+                        List<Job> remainingJobs = new ArrayList<>();
                         for (int j = 0; j < n; j++) {
                             Job job = backgroundJobs.get(j);
                             String marker = " ";
@@ -233,8 +234,16 @@ public class Main {
                             } else if (j == n - 2) {
                                 marker = "-";
                             }
-                            out.printf("[%d]%s  %-24s%s &\n", job.id, marker, "Running", job.command);
+                            boolean isAlive = job.process != null && job.process.isAlive();
+                            String status = isAlive ? "Running" : "Done";
+                            String trailing = isAlive ? " &" : "";
+                            out.printf("[%d]%s  %-24s%s%s\n", job.id, marker, status, job.command, trailing);
+                            if (isAlive) {
+                                remainingJobs.add(job);
+                            }
                         }
+                        backgroundJobs.clear();
+                        backgroundJobs.addAll(remainingJobs);
                     }
                 } finally {
                     if (closeOut) {
