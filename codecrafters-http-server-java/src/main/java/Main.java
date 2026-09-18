@@ -100,11 +100,28 @@ public class Main {
       } else if (path.startsWith("/echo/")) {
         String echoStr = path.substring(6);
         byte[] bodyBytes = echoStr.getBytes(StandardCharsets.UTF_8);
-        String response = "HTTP/1.1 200 OK\r\n"
-            + "Content-Type: text/plain\r\n"
-            + "Content-Length: " + bodyBytes.length + "\r\n\r\n"
-            + echoStr;
-        out.write(response.getBytes(StandardCharsets.UTF_8));
+
+        boolean supportsGzip = false;
+        String acceptEncoding = headers.get("Accept-Encoding");
+        if (acceptEncoding != null) {
+          String[] encodings = acceptEncoding.split(",");
+          for (String enc : encodings) {
+            if (enc.trim().equalsIgnoreCase("gzip")) {
+              supportsGzip = true;
+              break;
+            }
+          }
+        }
+
+        StringBuilder response = new StringBuilder("HTTP/1.1 200 OK\r\n");
+        response.append("Content-Type: text/plain\r\n");
+        if (supportsGzip) {
+          response.append("Content-Encoding: gzip\r\n");
+        }
+        response.append("Content-Length: ").append(bodyBytes.length).append("\r\n\r\n");
+        response.append(echoStr);
+
+        out.write(response.toString().getBytes(StandardCharsets.UTF_8));
       } else if (path.equals("/user-agent")) {
         String userAgent = headers.getOrDefault("User-Agent", "");
         byte[] bodyBytes = userAgent.getBytes(StandardCharsets.UTF_8);
