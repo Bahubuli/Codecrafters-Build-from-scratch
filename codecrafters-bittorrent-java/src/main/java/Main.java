@@ -327,7 +327,7 @@ public class Main {
                 byte[] reqDict = "d8:msg_typei0e6:piecei0ee".getBytes(StandardCharsets.UTF_8);
                 int reqPayloadLen = 1 + reqDict.length;
                 ByteBuffer metaReqMsg = ByteBuffer.allocate(4 + 1 + reqPayloadLen);
-                metaReqMsg.putInt(1 + reqPayloadLen);
+                metaReqMsg.putInt(reqPayloadLen);
                 metaReqMsg.put((byte) 20);
                 metaReqMsg.put((byte) peerUtMetadataId);
                 metaReqMsg.put(reqDict);
