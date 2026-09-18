@@ -72,17 +72,6 @@ public class Main {
           return;
         }
 
-        int rootpage = targetTable.rootpage;
-        long pageOffset = (long) (rootpage - 1) * pageSize;
-        int btreeHeaderOffset = (rootpage == 1) ? 100 : 0;
-
-        if (query.isCount && query.whereColumn == null) {
-          databaseFile.seek(pageOffset + btreeHeaderOffset + 3);
-          int rowCount = databaseFile.readUnsignedShort();
-          System.out.println(rowCount);
-          return;
-        }
-
         // Parse column definitions from CREATE TABLE sql statement
         List<ColumnInfo> columns = parseColumns(targetTable.sql);
         List<Integer> targetColIndices = new ArrayList<>();
@@ -119,84 +108,136 @@ public class Main {
           }
         }
 
-        // Read table root page
-        byte[] pageData = new byte[pageSize];
-        databaseFile.seek(pageOffset);
-        databaseFile.readFully(pageData);
-        ByteBuffer pageBuffer = ByteBuffer.wrap(pageData);
-
-        int cellCount = Short.toUnsignedInt(pageBuffer.getShort(btreeHeaderOffset + 3));
-        int cellPointerArrayOffset = btreeHeaderOffset + 8;
-
-        int matchCount = 0;
-        for (int i = 0; i < cellCount; i++) {
-          int cellOffset = Short.toUnsignedInt(pageBuffer.getShort(cellPointerArrayOffset + i * 2));
-          pageBuffer.position(cellOffset);
-
-          // Table leaf cell:
-          // 1. payload size (varint)
-          // 2. rowid (varint)
-          // 3. payload (record format)
-          readVarint(pageBuffer);
-          long rowid = readVarint(pageBuffer);
-
-          // Record format:
-          // 1. Header size (varint)
-          int headerStart = pageBuffer.position();
-          long headerSize = readVarint(pageBuffer);
-
-          // 2. Column serial types (varints)
-          List<Long> serialTypes = new ArrayList<>();
-          while (pageBuffer.position() - headerStart < headerSize) {
-            serialTypes.add(readVarint(pageBuffer));
-          }
-          pageBuffer.position(headerStart + (int) headerSize);
-
-          // 3. Record body: decode all columns in this record
-          int totalCols = Math.max(columns.size(), serialTypes.size());
-          String[] recordValues = new String[totalCols];
-          for (int col = 0; col < serialTypes.size(); col++) {
-            long st = serialTypes.get(col);
-            boolean isPk = (col < columns.size()) && columns.get(col).isIntegerPrimaryKey;
-            recordValues[col] = readColumnValue(pageBuffer, st, isPk, rowid);
-          }
-          for (int col = serialTypes.size(); col < columns.size(); col++) {
-            if (columns.get(col).isIntegerPrimaryKey) {
-              recordValues[col] = String.valueOf(rowid);
-            }
-          }
-
-          // Check WHERE condition
-          if (whereColIndex != -1) {
-            String rowVal = recordValues[whereColIndex];
-            if (rowVal == null || !rowVal.equals(query.whereValue)) {
-              continue;
-            }
-          }
-
-          if (query.isCount) {
-            matchCount++;
-            continue;
-          }
-
-          // Build row output according to requested columns order
-          List<String> rowValues = new ArrayList<>();
-          for (int colIdx : targetColIndices) {
-            String val = recordValues[colIdx];
-            rowValues.add(val != null ? val : "");
-          }
-
-          System.out.println(String.join("|", rowValues));
-        }
+        ScanContext ctx = new ScanContext(query, columns, targetColIndices, whereColIndex);
+        traverseTableBtree(databaseFile, pageSize, targetTable.rootpage, ctx);
 
         if (query.isCount) {
-          System.out.println(matchCount);
+          System.out.println(ctx.matchCount);
         }
       } catch (IOException e) {
         System.out.println("Error reading file: " + e.getMessage());
       }
     } else {
       System.out.println("Missing or invalid command passed: " + command);
+    }
+  }
+
+  static class ScanContext {
+    SelectQuery query;
+    List<ColumnInfo> columns;
+    List<Integer> targetColIndices;
+    int whereColIndex;
+    int matchCount;
+
+    ScanContext(SelectQuery query, List<ColumnInfo> columns, List<Integer> targetColIndices, int whereColIndex) {
+      this.query = query;
+      this.columns = columns;
+      this.targetColIndices = targetColIndices;
+      this.whereColIndex = whereColIndex;
+      this.matchCount = 0;
+    }
+  }
+
+  // Stage 8: Traverse multi-page table B-tree (interior pages 0x05 and leaf pages 0x0D)
+  static void traverseTableBtree(RandomAccessFile databaseFile, int pageSize, int pageNumber, ScanContext ctx) throws IOException {
+    long pageOffset = (long) (pageNumber - 1) * pageSize;
+    byte[] pageData = new byte[pageSize];
+    databaseFile.seek(pageOffset);
+    databaseFile.readFully(pageData);
+    ByteBuffer pageBuffer = ByteBuffer.wrap(pageData);
+
+    int btreeHeaderOffset = (pageNumber == 1) ? 100 : 0;
+    int pageType = pageBuffer.get(btreeHeaderOffset) & 0xFF;
+
+    if (pageType == 0x05) {
+      // Interior Table B-tree page:
+      // Offset 3..4: number of cells (2-byte unsigned short)
+      // Offset 8..11: rightmost child page number (4-byte unsigned int)
+      // Offset 12..: cell pointer array (2 bytes per cell)
+      int cellCount = Short.toUnsignedInt(pageBuffer.getShort(btreeHeaderOffset + 3));
+      int rightChildPage = pageBuffer.getInt(btreeHeaderOffset + 8);
+      int cellPointerArrayOffset = btreeHeaderOffset + 12;
+
+      for (int i = 0; i < cellCount; i++) {
+        int cellOffset = Short.toUnsignedInt(pageBuffer.getShort(cellPointerArrayOffset + i * 2));
+        // Interior cell structure:
+        // First 4 bytes: left child page number (4-byte unsigned big-endian integer)
+        // Following bytes: varint integer key (rowid)
+        int leftChildPage = pageBuffer.getInt(cellOffset);
+        traverseTableBtree(databaseFile, pageSize, leftChildPage, ctx);
+      }
+      traverseTableBtree(databaseFile, pageSize, rightChildPage, ctx);
+    } else if (pageType == 0x0D) {
+      // Leaf Table B-tree page:
+      // Offset 3..4: number of cells (2-byte unsigned short)
+      // Offset 8..: cell pointer array (2 bytes per cell)
+      int cellCount = Short.toUnsignedInt(pageBuffer.getShort(btreeHeaderOffset + 3));
+      int cellPointerArrayOffset = btreeHeaderOffset + 8;
+
+      if (ctx.query.isCount && ctx.query.whereColumn == null) {
+        ctx.matchCount += cellCount;
+        return;
+      }
+
+      for (int i = 0; i < cellCount; i++) {
+        int cellOffset = Short.toUnsignedInt(pageBuffer.getShort(cellPointerArrayOffset + i * 2));
+        pageBuffer.position(cellOffset);
+
+        // Table leaf cell:
+        // 1. payload size (varint)
+        // 2. rowid (varint)
+        // 3. payload (record format)
+        readVarint(pageBuffer);
+        long rowid = readVarint(pageBuffer);
+
+        // Record format:
+        // 1. Header size (varint)
+        int headerStart = pageBuffer.position();
+        long headerSize = readVarint(pageBuffer);
+
+        // 2. Column serial types (varints)
+        List<Long> serialTypes = new ArrayList<>();
+        while (pageBuffer.position() - headerStart < headerSize) {
+          serialTypes.add(readVarint(pageBuffer));
+        }
+        pageBuffer.position(headerStart + (int) headerSize);
+
+        // 3. Record body: decode all columns in this record
+        int totalCols = Math.max(ctx.columns.size(), serialTypes.size());
+        String[] recordValues = new String[totalCols];
+        for (int col = 0; col < serialTypes.size(); col++) {
+          long st = serialTypes.get(col);
+          boolean isPk = (col < ctx.columns.size()) && ctx.columns.get(col).isIntegerPrimaryKey;
+          recordValues[col] = readColumnValue(pageBuffer, st, isPk, rowid);
+        }
+        for (int col = serialTypes.size(); col < ctx.columns.size(); col++) {
+          if (ctx.columns.get(col).isIntegerPrimaryKey) {
+            recordValues[col] = String.valueOf(rowid);
+          }
+        }
+
+        // Check WHERE condition
+        if (ctx.whereColIndex != -1) {
+          String rowVal = recordValues[ctx.whereColIndex];
+          if (rowVal == null || !rowVal.equals(ctx.query.whereValue)) {
+            continue;
+          }
+        }
+
+        if (ctx.query.isCount) {
+          ctx.matchCount++;
+          continue;
+        }
+
+        // Build row output according to requested columns order
+        List<String> rowValues = new ArrayList<>();
+        for (int colIdx : ctx.targetColIndices) {
+          String val = recordValues[colIdx];
+          rowValues.add(val != null ? val : "");
+        }
+
+        System.out.println(String.join("|", rowValues));
+      }
     }
   }
 
@@ -222,7 +263,7 @@ public class Main {
       return null;
     }
     String selectExpr = matcher.group(1).trim();
-    String tableName = matcher.group(2).trim().replaceAll("[\"'\\[\\]`]", "");
+    String tableName = matcher.group(2).trim().replaceAll("[\"'\\\\\\[\\\\\\]`]", "");
     boolean isCount = selectExpr.replaceAll("\\s+", "").equalsIgnoreCase("count(*)");
 
     String whereColumn = null;
@@ -243,7 +284,7 @@ public class Main {
         whereColumn = whereClause.substring(0, eqIndex).trim();
         whereValue = whereClause.substring(eqIndex + opLen).trim();
 
-        whereColumn = whereColumn.replaceAll("[\"'\\[\\]`]", "").trim();
+        whereColumn = whereColumn.replaceAll("[\"'\\\\\\[\\\\\\]`]", "").trim();
         if (whereColumn.contains(".")) {
           whereColumn = whereColumn.substring(whereColumn.lastIndexOf('.') + 1).trim();
         }
@@ -264,7 +305,7 @@ public class Main {
     String[] parts = selectExpr.split(",");
     List<String> columns = new ArrayList<>();
     for (String part : parts) {
-      String col = part.replaceAll("[\"'\\[\\]`]", "").trim();
+      String col = part.replaceAll("[\"'\\\\\\[\\\\\\]`]", "").trim();
       if (col.contains(".")) {
         col = col.substring(col.lastIndexOf('.') + 1).trim();
       }
@@ -362,7 +403,7 @@ public class Main {
         rest = parts.length > 1 ? parts[1].trim() : "";
       }
 
-      colName = colName.replaceAll("[\"'\\[\\]`]", "").trim();
+      colName = colName.replaceAll("[\"'\\\\\\[\\\\\\]`]", "").trim();
 
       String upperCol = colName.toUpperCase();
       String upperRest = rest.toUpperCase();
