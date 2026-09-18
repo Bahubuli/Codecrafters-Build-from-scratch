@@ -2,6 +2,7 @@ import com.google.gson.Gson;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -39,8 +40,14 @@ public class Main {
       Map<String, Object> info = (Map<String, Object>) torrent.get("info");
       long length = (Long) info.get("length");
 
+      byte[] rawInfoBytes = parser.getRawInfoBytes();
+      MessageDigest md = MessageDigest.getInstance("SHA-1");
+      byte[] infoHashBytes = md.digest(rawInfoBytes);
+      String infoHash = bytesToHex(infoHashBytes);
+
       System.out.println("Tracker URL: " + announce);
       System.out.println("Length: " + length);
+      System.out.println("Info Hash: " + infoHash);
     } else {
       System.out.println("Unknown command: " + command);
     }
@@ -49,6 +56,14 @@ public class Main {
   static Object decodeBencode(String bencodedString) {
     ByteBencodeParser parser = new ByteBencodeParser(bencodedString.getBytes(StandardCharsets.UTF_8));
     return parser.parse();
+  }
+
+  private static String bytesToHex(byte[] bytes) {
+    StringBuilder sb = new StringBuilder(bytes.length * 2);
+    for (byte b : bytes) {
+      sb.append(String.format("%02x", b));
+    }
+    return sb.toString();
   }
 
   static class ByteBencodeParser {
