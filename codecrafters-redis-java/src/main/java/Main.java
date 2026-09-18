@@ -958,6 +958,63 @@ public class Main {
       int len = (entry != null && entry.rawBytes != null) ? entry.rawBytes.length : 0;
       out.write((":" + len + "\r\n").getBytes(StandardCharsets.UTF_8));
       out.flush();
+    } else if (command.equalsIgnoreCase("BITCOUNT")) {
+      if (parts.length < 2 || parts.length == 3) {
+        out.write("-ERR syntax error\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+      String rawKey = parts[1];
+      String key = stripQuotes(rawKey);
+      Entry entry = store.get(key);
+      if (entry == null && !key.equals(rawKey)) {
+        entry = store.get(rawKey);
+      }
+      if (entry != null && entry.isExpired()) {
+        store.remove(key);
+        if (!key.equals(rawKey)) {
+          store.remove(rawKey);
+        }
+        entry = null;
+      }
+
+      if (entry == null || entry.rawBytes == null || entry.rawBytes.length == 0) {
+        out.write(":0\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+
+      byte[] rawBytes = entry.rawBytes;
+      int start = 0;
+      int end = rawBytes.length - 1;
+      if (parts.length >= 4) {
+        try {
+          start = Integer.parseInt(parts[2]);
+          end = Integer.parseInt(parts[3]);
+        } catch (NumberFormatException e) {
+          out.write("-ERR value is not an integer or out of range\r\n".getBytes(StandardCharsets.UTF_8));
+          out.flush();
+          return;
+        }
+      }
+
+      if (start >= rawBytes.length || start > end) {
+        out.write(":0\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+
+      if (start < 0) start = 0;
+      if (end >= rawBytes.length) {
+        end = rawBytes.length - 1;
+      }
+
+      long count = 0;
+      for (int i = start; i <= end; i++) {
+        count += Integer.bitCount(rawBytes[i] & 0xFF);
+      }
+      out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
+      out.flush();
     } else if (command.equalsIgnoreCase("INCR")) {
       if (parts.length < 2) {
         out.write("-ERR wrong number of arguments for 'incr' command\r\n".getBytes(StandardCharsets.UTF_8));
