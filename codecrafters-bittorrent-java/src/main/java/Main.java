@@ -287,15 +287,41 @@ public class Main {
       for (Peer peer : peers) {
         try (Socket socket = new Socket(peer.ip, peer.port)) {
           socket.setSoTimeout(10000);
-          socket.getOutputStream().write(handshake);
-          socket.getOutputStream().flush();
+          OutputStream out = socket.getOutputStream();
+          InputStream in = socket.getInputStream();
 
-          byte[] response = socket.getInputStream().readNBytes(68);
+          out.write(handshake);
+          out.flush();
+
+          byte[] response = in.readNBytes(68);
           if (response.length < 68) {
             continue;
           }
           byte[] peerId = Arrays.copyOfRange(response, 48, 68);
           System.out.println("Peer ID: " + bytesToHex(peerId));
+
+          // Check if peer supports extensions (bit 20 from right -> byte index 25, mask 0x10)
+          boolean peerSupportsExtensions = (response[25] & 0x10) != 0;
+
+          // Receive bitfield message if sent
+          PeerMessage msg = readMessage(in);
+
+          if (peerSupportsExtensions) {
+            // Send extension handshake message:
+            // Message ID: 20 (extension)
+            // Payload: extension message ID: 0 (handshake), followed by bencoded dict: d1:md11:ut_metadatai16eee
+            byte[] bencodedDict = "d1:md11:ut_metadatai16eee".getBytes(StandardCharsets.UTF_8);
+            int extPayloadLen = 1 + bencodedDict.length;
+            ByteBuffer extMsg = ByteBuffer.allocate(4 + 1 + extPayloadLen);
+            extMsg.putInt(1 + extPayloadLen); // length prefix = 1 (msg id) + extPayloadLen
+            extMsg.put((byte) 20); // message id = 20
+            extMsg.put((byte) 0); // extension message id = 0 (handshake)
+            extMsg.put(bencodedDict);
+
+            out.write(extMsg.array());
+            out.flush();
+          }
+
           connected = true;
           break;
         } catch (Exception e) {
