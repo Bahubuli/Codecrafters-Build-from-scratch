@@ -7,6 +7,8 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 
@@ -36,30 +38,17 @@ public class Main {
       case "cat-file" -> {
         if (args.length >= 3 && args[1].equals("-p")) {
           String sha = args[2];
-          String dir = sha.substring(0, 2);
-          String filename = sha.substring(2);
-          File objectFile = new File(".git/objects/" + dir + "/" + filename);
-          try (InputStream in = new InflaterInputStream(new FileInputStream(objectFile));
-               ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            byte[] buf = new byte[8192];
-            int read;
-            while ((read = in.read(buf)) != -1) {
-              out.write(buf, 0, read);
+          byte[] decompressed = readObject(sha);
+          int nullIndex = -1;
+          for (int i = 0; i < decompressed.length; i++) {
+            if (decompressed[i] == 0) {
+              nullIndex = i;
+              break;
             }
-            byte[] decompressed = out.toByteArray();
-            int nullIndex = -1;
-            for (int i = 0; i < decompressed.length; i++) {
-              if (decompressed[i] == 0) {
-                nullIndex = i;
-                break;
-              }
-            }
-            if (nullIndex != -1) {
-              System.out.write(decompressed, nullIndex + 1, decompressed.length - (nullIndex + 1));
-              System.out.flush();
-            }
-          } catch (IOException e) {
-            throw new RuntimeException(e);
+          }
+          if (nullIndex != -1) {
+            System.out.write(decompressed, nullIndex + 1, decompressed.length - (nullIndex + 1));
+            System.out.flush();
           }
         }
       }
@@ -90,15 +79,7 @@ public class Main {
             String sha = sb.toString();
 
             if (write) {
-              String dir = sha.substring(0, 2);
-              String filename = sha.substring(2);
-              File dirFile = new File(".git/objects/" + dir);
-              dirFile.mkdirs();
-              File objectFile = new File(dirFile, filename);
-              try (FileOutputStream fos = new FileOutputStream(objectFile);
-                   DeflaterOutputStream dos = new DeflaterOutputStream(fos)) {
-                dos.write(fullData);
-              }
+              writeObject(sha, fullData);
             }
             System.out.println(sha);
           } catch (Exception e) {
@@ -106,7 +87,101 @@ public class Main {
           }
         }
       }
+      case "ls-tree" -> {
+        boolean nameOnly = false;
+        String treeSha = null;
+        for (int i = 1; i < args.length; i++) {
+          if (args[i].equals("--name-only")) {
+            nameOnly = true;
+          } else {
+            treeSha = args[i];
+          }
+        }
+        if (treeSha != null) {
+          byte[] decompressed = readObject(treeSha);
+          int nullIndex = -1;
+          for (int i = 0; i < decompressed.length; i++) {
+            if (decompressed[i] == 0) {
+              nullIndex = i;
+              break;
+            }
+          }
+          if (nullIndex != -1) {
+            int ptr = nullIndex + 1;
+            while (ptr < decompressed.length) {
+              int spaceIdx = -1;
+              for (int i = ptr; i < decompressed.length; i++) {
+                if (decompressed[i] == ' ') {
+                  spaceIdx = i;
+                  break;
+                }
+              }
+              if (spaceIdx == -1) break;
+              String mode = new String(decompressed, ptr, spaceIdx - ptr, StandardCharsets.UTF_8);
+
+              int entryNullIdx = -1;
+              for (int i = spaceIdx + 1; i < decompressed.length; i++) {
+                if (decompressed[i] == 0) {
+                  entryNullIdx = i;
+                  break;
+                }
+              }
+              if (entryNullIdx == -1) break;
+              String name = new String(decompressed, spaceIdx + 1, entryNullIdx - (spaceIdx + 1), StandardCharsets.UTF_8);
+
+              byte[] shaBytes = new byte[20];
+              System.arraycopy(decompressed, entryNullIdx + 1, shaBytes, 0, 20);
+              StringBuilder sb = new StringBuilder();
+              for (byte b : shaBytes) {
+                sb.append(String.format("%02x", b));
+              }
+              String shaHex = sb.toString();
+
+              ptr = entryNullIdx + 1 + 20;
+
+              if (nameOnly) {
+                System.out.println(name);
+              } else {
+                String formattedMode = mode.length() == 5 ? "0" + mode : mode;
+                String type = mode.startsWith("4") || mode.startsWith("04") ? "tree" : "blob";
+                System.out.println(formattedMode + " " + type + " " + shaHex + "\t" + name);
+              }
+            }
+          }
+        }
+      }
       default -> System.out.println("Unknown command: " + command);
+    }
+  }
+
+  private static byte[] readObject(String sha) {
+    String dir = sha.substring(0, 2);
+    String filename = sha.substring(2);
+    File objectFile = new File(".git/objects/" + dir + "/" + filename);
+    try (InputStream in = new InflaterInputStream(new FileInputStream(objectFile));
+         ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+      byte[] buf = new byte[8192];
+      int read;
+      while ((read = in.read(buf)) != -1) {
+        out.write(buf, 0, read);
+      }
+      return out.toByteArray();
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  private static void writeObject(String sha, byte[] fullData) {
+    String dir = sha.substring(0, 2);
+    String filename = sha.substring(2);
+    File dirFile = new File(".git/objects/" + dir);
+    dirFile.mkdirs();
+    File objectFile = new File(dirFile, filename);
+    try (FileOutputStream fos = new FileOutputStream(objectFile);
+         DeflaterOutputStream dos = new DeflaterOutputStream(fos)) {
+      dos.write(fullData);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
     }
   }
 }
