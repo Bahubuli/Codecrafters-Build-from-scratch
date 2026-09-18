@@ -1050,6 +1050,14 @@ public class Main {
         out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
         out.flush();
       }
+    } else if (command.equalsIgnoreCase("ACL")) {
+      if (parts.length >= 2 && parts[1].equalsIgnoreCase("WHOAMI")) {
+        out.write("$7\r\ndefault\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      } else {
+        out.write("-ERR unknown subcommand or wrong number of arguments for 'ACL'\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      }
     } else if (command.equalsIgnoreCase("ZRANGE")) {
       if (parts.length < 4) {
         out.write("-ERR wrong number of arguments for 'zrange' command\r\n".getBytes(StandardCharsets.UTF_8));
