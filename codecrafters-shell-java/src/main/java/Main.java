@@ -43,6 +43,7 @@ public class Main {
         enableRawMode();
 
         while (true) {
+            reapCompletedJobs(System.out);
             System.out.print("$ ");
             System.out.flush();
             String input = readLineWithCompletion();
@@ -637,6 +638,28 @@ public class Main {
             args.add(current.toString());
         }
         return args;
+    }
+
+    private static void reapCompletedJobs(PrintStream out) {
+        int n = backgroundJobs.size();
+        List<Job> remainingJobs = new ArrayList<>();
+        for (int j = 0; j < n; j++) {
+            Job job = backgroundJobs.get(j);
+            String marker = " ";
+            if (j == n - 1) {
+                marker = "+";
+            } else if (j == n - 2) {
+                marker = "-";
+            }
+            boolean isAlive = job.process != null && job.process.isAlive();
+            if (!isAlive) {
+                out.printf("[%d]%s  %-24s%s%n", job.id, marker, "Done", job.command);
+            } else {
+                remainingJobs.add(job);
+            }
+        }
+        backgroundJobs.clear();
+        backgroundJobs.addAll(remainingJobs);
     }
 
     private static Path findExecutable(String command) {
