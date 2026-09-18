@@ -838,12 +838,15 @@ public class Main {
                     }
                     // Multiple concurrent transactions: emit array header and execute queued commands atomically
                     out.write(("*" + txQueue.size() + "\r\n").getBytes(StandardCharsets.UTF_8));
-                    for (String[] cmd : txQueue) {
-                      handleCommand(cmd, out);
+                    try {
+                      for (String[] cmd : txQueue) {
+                        handleCommand(cmd, out);
+                      }
+                    } finally {
+                      unwatchAll(clientCtx);
+                      out.flush();
+                      txQueue.clear();
                     }
-                    unwatchAll(clientCtx);
-                    out.flush();
-                    txQueue.clear();
                   }
                   continue;
                 } else if (command.equalsIgnoreCase("DISCARD")) {
