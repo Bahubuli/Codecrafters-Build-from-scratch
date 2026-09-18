@@ -1,6 +1,8 @@
 import com.google.gson.Gson;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public class Main {
   private static final Gson gson = new Gson();
@@ -51,6 +53,8 @@ public class Main {
         return parseInteger();
       } else if (ch == 'l') {
         return parseList();
+      } else if (ch == 'd') {
+        return parseDictionary();
       } else {
         throw new RuntimeException("Unsupported bencode element starting with: " + ch);
       }
@@ -94,6 +98,23 @@ public class Main {
       // Consume 'e'
       index++;
       return list;
+    }
+
+    private Map<String, Object> parseDictionary() {
+      // Consume 'd'
+      index++;
+      Map<String, Object> map = new LinkedHashMap<>();
+      while (index < src.length() && src.charAt(index) != 'e') {
+        String key = parseString();
+        Object value = parse();
+        map.put(key, value);
+      }
+      if (index >= src.length() || src.charAt(index) != 'e') {
+        throw new RuntimeException("Invalid bencoded dictionary: missing 'e'");
+      }
+      // Consume 'e'
+      index++;
+      return map;
     }
   }
 }
