@@ -1,3 +1,4 @@
+import java.nio.charset.StandardCharsets;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -280,7 +281,7 @@ public class Main {
                                 prevWord = beforeCurrentWord.substring(prevSpace + 1);
                             }
                         }
-                        List<String> scriptOutput = runCompleterScript(script, firstWord, word, prevWord);
+                        List<String> scriptOutput = runCompleterScript(script, firstWord, word, prevWord, current);
                         matches = new TreeSet<>(scriptOutput);
                     } else {
                         matches = getFileCompletions(word);
@@ -342,10 +343,12 @@ public class Main {
         }
     }
 
-    private static List<String> runCompleterScript(String scriptPath, String command, String word, String prevWord) {
+    private static List<String> runCompleterScript(String scriptPath, String command, String word, String prevWord, String compLine) {
         List<String> results = new ArrayList<>();
         try {
             ProcessBuilder pb = new ProcessBuilder(scriptPath, command, word, prevWord);
+            pb.environment().put("COMP_LINE", compLine);
+            pb.environment().put("COMP_POINT", String.valueOf(compLine.getBytes(StandardCharsets.UTF_8).length));
             pb.directory(currentDir.toFile());
             Process p = pb.start();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
