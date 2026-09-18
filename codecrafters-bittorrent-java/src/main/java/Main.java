@@ -1,4 +1,6 @@
 import com.google.gson.Gson;
+import java.util.ArrayList;
+import java.util.List;
 
 public class Main {
   private static final Gson gson = new Gson();
@@ -47,6 +49,8 @@ public class Main {
         return parseString();
       } else if (ch == 'i') {
         return parseInteger();
+      } else if (ch == 'l') {
+        return parseList();
       } else {
         throw new RuntimeException("Unsupported bencode element starting with: " + ch);
       }
@@ -75,6 +79,21 @@ public class Main {
       String numStr = src.substring(index + 1, endIndex);
       index = endIndex + 1;
       return Long.parseLong(numStr);
+    }
+
+    private List<Object> parseList() {
+      // Consume 'l'
+      index++;
+      List<Object> list = new ArrayList<>();
+      while (index < src.length() && src.charAt(index) != 'e') {
+        list.add(parse());
+      }
+      if (index >= src.length() || src.charAt(index) != 'e') {
+        throw new RuntimeException("Invalid bencoded list: missing 'e'");
+      }
+      // Consume 'e'
+      index++;
+      return list;
     }
   }
 }
