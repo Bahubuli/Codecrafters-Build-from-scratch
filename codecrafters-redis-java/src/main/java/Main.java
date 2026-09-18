@@ -158,6 +158,15 @@ public class Main {
         return 1;
       }
     }
+
+    synchronized Integer rank(String member) {
+      Double score = dict.get(member);
+      if (score == null) {
+        return null;
+      }
+      ZSetEntry target = new ZSetEntry(member, score);
+      return tree.headSet(target, false).size();
+    }
   }
 
   private static final Map<String, List<String>> listStore = new ConcurrentHashMap<>();
@@ -704,6 +713,28 @@ public class Main {
           appendToAof(parts);
         }
         out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
+      }
+    } else if (command.equalsIgnoreCase("ZRANK")) {
+      if (parts.length < 3) {
+        out.write("-ERR wrong number of arguments for 'zrank' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      } else {
+        String key = parts[1];
+        String member = parts[2];
+        SortedSet zset = zsetStore.get(key);
+        if (zset == null) {
+          out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
+          out.flush();
+        } else {
+          Integer rank = zset.rank(member);
+          if (rank == null) {
+            out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
+            out.flush();
+          } else {
+            out.write((":" + rank + "\r\n").getBytes(StandardCharsets.UTF_8));
+            out.flush();
+          }
+        }
       }
     } else if (command.equalsIgnoreCase("ZADD")) {
       if (parts.length < 4 || (parts.length - 2) % 2 != 0) {
