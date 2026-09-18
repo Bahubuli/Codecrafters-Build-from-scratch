@@ -176,6 +176,10 @@ public class Main {
       return dict.get(member);
     }
 
+    synchronized Map<String, Double> getAll() {
+      return new HashMap<>(dict);
+    }
+
     synchronized int remove(String member) {
       Double score = dict.remove(member);
       if (score != null) {
@@ -981,6 +985,70 @@ public class Main {
           }
           out.flush();
         }
+      }
+    } else if (command.equalsIgnoreCase("GEOSEARCH")) {
+      if (parts.length < 8) {
+        out.write("-ERR wrong number of arguments for 'geosearch' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      } else {
+        String key = parts[1];
+        Double centerLon = null;
+        Double centerLat = null;
+        Double radius = null;
+        String unit = "m";
+
+        for (int i = 2; i < parts.length; i++) {
+          String opt = parts[i].toUpperCase();
+          if (opt.equals("FROMLONLAT") && i + 2 < parts.length) {
+            centerLon = Double.parseDouble(parts[++i]);
+            centerLat = Double.parseDouble(parts[++i]);
+          } else if (opt.equals("FROMMEMBER") && i + 1 < parts.length) {
+            String member = parts[++i];
+            SortedSet z = zsetStore.get(key);
+            if (z != null && z.getScore(member) != null) {
+              double[] coords = decodeGeo((long) z.getScore(member).doubleValue());
+              centerLon = coords[0];
+              centerLat = coords[1];
+            }
+          } else if (opt.equals("BYRADIUS") && i + 2 < parts.length) {
+            radius = Double.parseDouble(parts[++i]);
+            unit = parts[++i].toLowerCase();
+          }
+        }
+
+        double multiplier = 1.0;
+        if (unit.equals("m")) {
+          multiplier = 1.0;
+        } else if (unit.equals("km")) {
+          multiplier = 1000.0;
+        } else if (unit.equals("mi")) {
+          multiplier = 1609.34;
+        } else if (unit.equals("ft")) {
+          multiplier = 0.3048;
+        }
+
+        SortedSet zset = zsetStore.get(key);
+        List<String> results = new ArrayList<>();
+        if (zset != null && centerLon != null && centerLat != null && radius != null) {
+          double radiusInMeters = radius * multiplier;
+          Map<String, Double> all = zset.getAll();
+          for (Map.Entry<String, Double> entry : all.entrySet()) {
+            double[] coords = decodeGeo((long) entry.getValue().doubleValue());
+            double dist = geohashGetDistance(centerLon, centerLat, coords[0], coords[1]);
+            if (dist <= radiusInMeters) {
+              results.add(entry.getKey());
+            }
+          }
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("*").append(results.size()).append("\r\n");
+        for (String m : results) {
+          byte[] b = m.getBytes(StandardCharsets.UTF_8);
+          sb.append("$").append(b.length).append("\r\n").append(m).append("\r\n");
+        }
+        out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+        out.flush();
       }
     } else if (command.equalsIgnoreCase("ZRANGE")) {
       if (parts.length < 4) {
