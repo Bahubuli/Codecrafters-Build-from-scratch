@@ -176,6 +176,15 @@ public class Main {
       return dict.get(member);
     }
 
+    synchronized int remove(String member) {
+      Double score = dict.remove(member);
+      if (score != null) {
+        tree.remove(new ZSetEntry(member, score));
+        return 1;
+      }
+      return 0;
+    }
+
     synchronized List<String> range(int start, int stop) {
       int n = tree.size();
       if (n == 0) return Collections.emptyList();
@@ -772,6 +781,27 @@ public class Main {
               ? Long.toString((long) (double) score)
               : Double.toString(score);
           out.write(("$" + scoreStr.length() + "\r\n" + scoreStr + "\r\n").getBytes(StandardCharsets.UTF_8));
+        }
+        out.flush();
+      }
+    } else if (command.equalsIgnoreCase("ZREM")) {
+      if (parts.length < 3) {
+        out.write("-ERR wrong number of arguments for 'zrem' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      } else {
+        String key = parts[1];
+        SortedSet zset = zsetStore.get(key);
+        if (zset == null) {
+          out.write(":0\r\n".getBytes(StandardCharsets.UTF_8));
+        } else {
+          int removed = 0;
+          for (int i = 2; i < parts.length; i++) {
+            removed += zset.remove(parts[i]);
+          }
+          if (zset.size() == 0) {
+            zsetStore.remove(key);
+          }
+          out.write((":" + removed + "\r\n").getBytes(StandardCharsets.UTF_8));
         }
         out.flush();
       }
