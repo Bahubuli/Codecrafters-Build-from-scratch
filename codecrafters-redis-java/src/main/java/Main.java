@@ -71,6 +71,7 @@ public class Main {
   private static String role = "master";
   private static String masterHost = null;
   private static int masterPort = -1;
+  private static Socket masterSocket = null;
 
   private static String masterReplId = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
   private static long masterReplOffset = 0;
@@ -852,6 +853,46 @@ public class Main {
     try {
       ServerSocket serverSocket = new ServerSocket(port);
       serverSocket.setReuseAddress(true);
+
+      if (masterHost != null && masterPort != -1) {
+        final String host = masterHost;
+        final int mPort = masterPort;
+        new Thread(() -> {
+          try {
+            Socket socket = null;
+            for (int attempt = 0; attempt < 5; attempt++) {
+              try {
+                socket = new Socket(host, mPort);
+                break;
+              } catch (IOException e) {
+                try {
+                  Thread.sleep(100);
+                } catch (InterruptedException ignored) {
+                  Thread.currentThread().interrupt();
+                  break;
+                }
+              }
+            }
+            if (socket == null) {
+              socket = new Socket(host, mPort);
+            }
+
+            masterSocket = socket;
+            OutputStream masterOut = socket.getOutputStream();
+            InputStream masterIn = socket.getInputStream();
+            BufferedReader masterReader = new BufferedReader(new InputStreamReader(masterIn));
+
+            // Handshake Step 1: Send PING
+            masterOut.write("*1\r\n$4\r\nPING\r\n".getBytes(StandardCharsets.UTF_8));
+            masterOut.flush();
+
+            String response = masterReader.readLine();
+            System.out.println("Master response to PING: " + response);
+          } catch (IOException e) {
+            System.err.println("Replication handshake failed: " + e.getMessage());
+          }
+        }).start();
+      }
 
       while (true) {
         Socket clientSocket = serverSocket.accept();
