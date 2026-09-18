@@ -1,4 +1,5 @@
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -183,6 +184,31 @@ public class Main {
       }
     }
     return results;
+  }
+
+  private static String readLine(InputStream in) throws IOException {
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    int b;
+    while ((b = in.read()) != -1) {
+      if (b == '\r') {
+        int next = in.read();
+        if (next == '\n') {
+          break;
+        }
+        baos.write(b);
+        if (next != -1) {
+          baos.write(next);
+        }
+      } else if (b == '\n') {
+        break;
+      } else {
+        baos.write(b);
+      }
+    }
+    if (b == -1 && baos.size() == 0) {
+      return null;
+    }
+    return baos.toString(StandardCharsets.UTF_8);
   }
 
   private static void handleCommand(String[] parts, OutputStream out) throws IOException {
@@ -930,13 +956,12 @@ public class Main {
             masterSocket = socket;
             OutputStream masterOut = socket.getOutputStream();
             InputStream masterIn = socket.getInputStream();
-            BufferedReader masterReader = new BufferedReader(new InputStreamReader(masterIn));
 
             // Handshake Step 1: Send PING
             masterOut.write("*1\r\n$4\r\nPING\r\n".getBytes(StandardCharsets.UTF_8));
             masterOut.flush();
 
-            String response = masterReader.readLine();
+            String response = readLine(masterIn);
             System.out.println("Master response to PING: " + response);
 
             // Handshake Step 2: Send REPLCONF listening-port <PORT>
@@ -945,7 +970,7 @@ public class Main {
             masterOut.write(replconfPort.getBytes(StandardCharsets.UTF_8));
             masterOut.flush();
 
-            response = masterReader.readLine();
+            response = readLine(masterIn);
             System.out.println("Master response to REPLCONF listening-port: " + response);
 
             // Handshake Step 2 (cont.): Send REPLCONF capa psync2
@@ -953,7 +978,7 @@ public class Main {
             masterOut.write(replconfCapa.getBytes(StandardCharsets.UTF_8));
             masterOut.flush();
 
-            response = masterReader.readLine();
+            response = readLine(masterIn);
             System.out.println("Master response to REPLCONF capa: " + response);
 
             // Handshake Step 3: Send PSYNC ? -1
@@ -961,8 +986,66 @@ public class Main {
             masterOut.write(psyncCmd.getBytes(StandardCharsets.UTF_8));
             masterOut.flush();
 
-            response = masterReader.readLine();
+            response = readLine(masterIn);
             System.out.println("Master response to PSYNC: " + response);
+
+            // Stage 63: Parse RDB file transfer from master
+            String rdbHeader = readLine(masterIn);
+            while (rdbHeader != null && !rdbHeader.startsWith("$")) {
+              rdbHeader = readLine(masterIn);
+            }
+            if (rdbHeader != null && rdbHeader.startsWith("$")) {
+              int rdbLen = Integer.parseInt(rdbHeader.substring(1).trim());
+              byte[] rdbBytes = masterIn.readNBytes(rdbLen);
+              System.out.println("Received RDB file: " + rdbBytes.length + " bytes");
+            }
+
+            // Stage 63: Enter continuous command processing loop for propagated commands
+            OutputStream nullOut = OutputStream.nullOutputStream();
+            while (true) {
+              String line = readLine(masterIn);
+              if (line == null) {
+                break; // Master disconnected
+              }
+              if (line.isEmpty()) {
+                continue;
+              }
+              if (line.startsWith("*")) {
+                int numArgs = Integer.parseInt(line.substring(1).trim());
+                String[] parts = new String[numArgs];
+                boolean complete = true;
+                for (int i = 0; i < numArgs; i++) {
+                  String lenLine = readLine(masterIn);
+                  if (lenLine == null) {
+                    complete = false;
+                    break;
+                  }
+                  int argLen = Integer.parseInt(lenLine.substring(1).trim());
+                  byte[] argBytes = masterIn.readNBytes(argLen);
+                  parts[i] = new String(argBytes, StandardCharsets.UTF_8);
+                  int cr = masterIn.read();
+                  int lf = masterIn.read();
+                  if (cr == -1 || lf == -1) {
+                    complete = false;
+                    break;
+                  }
+                }
+                if (complete) {
+                  try {
+                    handleCommand(parts, nullOut);
+                  } catch (Exception e) {
+                    System.err.println("Error processing propagated command: " + e.getMessage());
+                  }
+                }
+              } else {
+                String[] parts = line.split("\\s+");
+                try {
+                  handleCommand(parts, nullOut);
+                } catch (Exception e) {
+                  System.err.println("Error processing inline command: " + e.getMessage());
+                }
+              }
+            }
           } catch (IOException e) {
             System.err.println("Replication handshake failed: " + e.getMessage());
           }
