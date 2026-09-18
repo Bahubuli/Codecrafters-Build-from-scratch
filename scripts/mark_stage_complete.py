@@ -102,15 +102,22 @@ def main():
             resume_btn.click()
             time.sleep(3)
 
-        # Look for "Mark stage as complete" or "Mark as complete" button
-        mark_btn = page.query_selector("button:has-text('Mark stage as complete'), a:has-text('Mark stage as complete'), button:has-text('Mark as complete'), a:has-text('Mark as complete')")
-        if mark_btn:
-            print("Found 'Mark as complete' button. Clicking...")
-            mark_btn.click()
+        # Look for "Mark stage as complete" or "Mark as complete" element (can be button, a, or div)
+        mark_el = page.locator('text="Mark stage as complete"').first
+        if mark_el.is_visible():
+            print("Found 'Mark stage as complete' locator. Clicking...")
+            mark_el.click()
             time.sleep(4)
-            print("Successfully clicked 'Mark as complete'!")
+            print("Successfully clicked 'Mark stage as complete'!")
         else:
-            print("No 'Mark stage as complete' button found (stage may already be completed or pending test run).")
+            mark_btn = page.query_selector("button:has-text('Mark stage as complete'), a:has-text('Mark stage as complete'), button:has-text('Mark as complete'), a:has-text('Mark as complete')")
+            if mark_btn:
+                print("Found 'Mark as complete' button. Clicking...")
+                mark_btn.click()
+                time.sleep(4)
+                print("Successfully clicked 'Mark as complete'!")
+            else:
+                print("No 'Mark stage as complete' button found (stage may already be completed or pending test run).")
 
         # Check for confirmation dialogs
         confirm_btn = page.query_selector("button:has-text('Confirm'), button:has-text('Proceed'), button:has-text('Yes'), button:has-text('Continue')")
