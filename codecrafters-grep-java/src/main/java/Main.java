@@ -1,5 +1,7 @@
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.Scanner;
+import java.util.Set;
 
 public class Main {
     public static void main(String[] args) {
@@ -48,12 +50,29 @@ public class Main {
         }
     }
 
+    static class PositiveGroupToken implements Token {
+        private final Set<Character> chars;
+        public PositiveGroupToken(String characters) {
+            this.chars = new HashSet<>();
+            for (char c : characters.toCharArray()) {
+                this.chars.add(c);
+            }
+        }
+        @Override
+        public boolean matches(char c) {
+            return chars.contains(c);
+        }
+    }
+
     public static boolean matchPattern(String inputLine, String pattern) {
         Token token;
         if (pattern.equals("\\d")) {
             token = new DigitToken();
         } else if (pattern.equals("\\w")) {
             token = new WordToken();
+        } else if (pattern.startsWith("[") && pattern.endsWith("]") && !pattern.startsWith("[^")) {
+            String chars = pattern.substring(1, pattern.length() - 1);
+            token = new PositiveGroupToken(chars);
         } else if (pattern.length() == 1) {
             token = new LiteralToken(pattern.charAt(0));
         } else {
