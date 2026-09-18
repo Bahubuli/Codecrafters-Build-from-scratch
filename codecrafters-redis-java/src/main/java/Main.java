@@ -100,6 +100,8 @@ public class Main {
   private static class ClientContext {
     final Set<String> watchedKeys = ConcurrentHashMap.newKeySet();
     volatile boolean dirtyCas = false;
+    final Set<String> subscribedChannels = ConcurrentHashMap.newKeySet();
+    OutputStream out;
   }
 
   private static final Map<String, Entry> store = new ConcurrentHashMap<>();
@@ -108,6 +110,7 @@ public class Main {
   private static final Map<String, Queue<CompletableFuture<String>>> blockedWaiters = new ConcurrentHashMap<>();
   private static final Map<String, Object> keyLocks = new ConcurrentHashMap<>();
   private static final Map<String, Set<ClientContext>> keyWatchers = new ConcurrentHashMap<>();
+  private static final Map<String, Set<ClientContext>> channelSubscribers = new ConcurrentHashMap<>();
   private static final Object streamNotifier = new Object();
   private static final Object txExecutionLock = new Object();
   private static int port = 6379;
@@ -383,6 +386,19 @@ public class Main {
     }
     clientCtx.watchedKeys.clear();
     clientCtx.dirtyCas = false;
+  }
+
+  private static void unsubscribeAll(ClientContext clientCtx) {
+    for (String chan : clientCtx.subscribedChannels) {
+      Set<ClientContext> subs = channelSubscribers.get(chan);
+      if (subs != null) {
+        subs.remove(clientCtx);
+        if (subs.isEmpty()) {
+          channelSubscribers.remove(chan);
+        }
+      }
+    }
+    clientCtx.subscribedChannels.clear();
   }
 
   private static int compareStreamId(long ms1, long seq1, long ms2, long seq2) {
@@ -1875,6 +1891,29 @@ public class Main {
                 unwatchAll(clientCtx);
                 out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
                 out.flush();
+              } else if (command.equalsIgnoreCase("SUBSCRIBE")) {
+                if (parts.length < 2) {
+                  out.write("-ERR wrong number of arguments for 'subscribe' command\r\n".getBytes(StandardCharsets.UTF_8));
+                  out.flush();
+                } else {
+                  clientCtx.out = out;
+                  for (int i = 1; i < parts.length; i++) {
+                    String chan = parts[i];
+                    clientCtx.subscribedChannels.add(chan);
+                    channelSubscribers.computeIfAbsent(chan, k -> ConcurrentHashMap.newKeySet()).add(clientCtx);
+                    int count = clientCtx.subscribedChannels.size();
+                    StringBuilder resp = new StringBuilder();
+                    resp.append("*3\r\n");
+                    resp.append("$9\r\nsubscribe\r\n");
+                    byte[] chanBytes = chan.getBytes(StandardCharsets.UTF_8);
+                    resp.append("$").append(chanBytes.length).append("\r\n").append(chan).append("\r\n");
+                    resp.append(":").append(count).append("\r\n");
+                    synchronized (out) {
+                      out.write(resp.toString().getBytes(StandardCharsets.UTF_8));
+                      out.flush();
+                    }
+                  }
+                }
               } else {
                 handleCommand(parts, out);
                 out.flush();
@@ -1891,6 +1930,7 @@ public class Main {
               }
             }
             unwatchAll(clientCtx);
+            unsubscribeAll(clientCtx);
             try {
               clientSocket.close();
             } catch (IOException ignored) {}
