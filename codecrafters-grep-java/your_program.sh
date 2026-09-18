@@ -21,4 +21,10 @@ set -e # Exit early if any commands fail
 #
 # - Edit this to change how your program runs locally
 # - Edit .codecrafters/run.sh to change how your program runs remotely
+if [ -t 1 ]; then
+  export IS_TTY="true"
+else
+  export IS_TTY="false"
+fi
+
 exec java --enable-preview -jar /tmp/codecrafters-build-grep-java/codecrafters-grep.jar "$@"

@@ -8,4 +8,10 @@
 
 set -e # Exit on failure
 
+if [ -t 1 ]; then
+  export IS_TTY="true"
+else
+  export IS_TTY="false"
+fi
+
 exec java --enable-preview -jar /tmp/codecrafters-build-grep-java/codecrafters-grep.jar "$@"

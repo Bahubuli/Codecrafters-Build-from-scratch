@@ -107,6 +107,10 @@ public class Main {
     }
 
     private static boolean isStdoutTty() {
+        String env = System.getenv("IS_TTY");
+        if (env != null) {
+            return "true".equalsIgnoreCase(env);
+        }
         return System.console() != null;
     }
 
