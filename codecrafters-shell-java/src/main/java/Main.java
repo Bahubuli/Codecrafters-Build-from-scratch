@@ -56,6 +56,23 @@ public class Main {
     public static void main(String[] args) throws Exception {
         enableRawMode();
 
+        String histFile = System.getenv("HISTFILE");
+        if (histFile != null && !histFile.isEmpty()) {
+            try {
+                Path p = currentDir.resolve(histFile).normalize();
+                if (Files.exists(p)) {
+                    List<String> fileLines = Files.readAllLines(p);
+                    for (String fl : fileLines) {
+                        if (!fl.isEmpty()) {
+                            commandHistory.add(fl);
+                        }
+                    }
+                    lastAppendedHistoryIndex = commandHistory.size();
+                }
+            } catch (IOException ignored) {}
+        }
+
+
         while (true) {
             reapCompletedJobs(System.out);
             System.out.print("$ ");
