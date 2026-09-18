@@ -1,6 +1,11 @@
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Scanner;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 public class Main {
     private static final Set<String> BUILTINS = Set.of("echo", "exit", "type");
@@ -39,12 +44,38 @@ public class Main {
                     if (BUILTINS.contains(target)) {
                         System.out.println(target + " is a shell builtin");
                     } else {
-                        System.out.println(target + ": not found");
+                        Path executable = findExecutableInPath(target);
+                        if (executable != null) {
+                            System.out.println(target + " is " + executable);
+                        } else {
+                            System.out.println(target + ": not found");
+                        }
                     }
                 }
             } else {
                 System.out.println(input + ": command not found");
             }
         }
+    }
+
+    private static Path findExecutableInPath(String command) {
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv == null || pathEnv.isEmpty()) {
+            return null;
+        }
+        String[] dirs = pathEnv.split(Pattern.quote(File.pathSeparator));
+        for (String dir : dirs) {
+            if (dir.isEmpty()) {
+                continue;
+            }
+            try {
+                Path path = Paths.get(dir, command);
+                if (Files.isRegularFile(path) && Files.isExecutable(path)) {
+                    return path;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
     }
 }
