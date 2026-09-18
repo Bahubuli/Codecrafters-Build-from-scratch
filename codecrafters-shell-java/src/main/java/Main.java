@@ -2,7 +2,11 @@ import java.nio.charset.StandardCharsets;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -133,99 +137,7 @@ public class Main {
                 }
 
                 try {
-                    if (command.equals("exit")) {
-                        int exitCode = 0;
-                        if (cmdArgs.size() > 1) {
-                            try {
-                                exitCode = Integer.parseInt(cmdArgs.get(1));
-                            } catch (NumberFormatException ignored) {
-                            }
-                        }
-                        if (closeOut) {
-                            out.close();
-                            closeOut = false;
-                        }
-                        if (closeErr) {
-                            err.close();
-                            closeErr = false;
-                        }
-                        setRawMode(false);
-                        System.exit(exitCode);
-                    } else if (command.equals("echo")) {
-                        String output = String.join(" ", cmdArgs.subList(1, cmdArgs.size()));
-                        out.println(output);
-                    } else if (command.equals("type")) {
-                        if (cmdArgs.size() > 1) {
-                            String target = cmdArgs.get(1);
-                            if (BUILTINS.contains(target)) {
-                                out.println(target + " is a shell builtin");
-                            } else {
-                                Path executable = findExecutable(target);
-                                if (executable != null) {
-                                    out.println(target + " is " + executable);
-                                } else {
-                                    out.println(target + ": not found");
-                                }
-                            }
-                        }
-                    } else if (command.equals("pwd")) {
-                        out.println(currentDir);
-                    } else if (command.equals("cd")) {
-                        String home = System.getenv("HOME");
-                        if (home == null || home.isEmpty()) {
-                            home = System.getProperty("user.home");
-                        }
-                        String targetPath = cmdArgs.size() > 1 ? cmdArgs.get(1) : home;
-                        if (targetPath.equals("~")) {
-                            targetPath = home;
-                        } else if (targetPath.startsWith("~/")) {
-                            targetPath = home + targetPath.substring(1);
-                        }
-
-                        Path target = currentDir.resolve(targetPath).normalize();
-                        if (Files.isDirectory(target)) {
-                            currentDir = target;
-                        } else {
-                            err.println("cd: " + targetPath + ": No such file or directory");
-                        }
-                    } else if (command.equals("complete")) {
-                        if (cmdArgs.size() >= 3 && cmdArgs.get(1).equals("-p")) {
-                            String target = cmdArgs.get(2);
-                            if (COMPLETION_SPECS.containsKey(target)) {
-                                out.println("complete -C '" + COMPLETION_SPECS.get(target) + "' " + target);
-                            } else {
-                                err.println("complete: " + target + ": no completion specification");
-                            }
-                        } else if (cmdArgs.size() >= 3 && cmdArgs.get(1).equals("-r")) {
-                            String target = cmdArgs.get(2);
-                            COMPLETION_SPECS.remove(target);
-                        } else if (cmdArgs.size() >= 4 && cmdArgs.get(1).equals("-C")) {
-                            String scriptPath = cmdArgs.get(2);
-                            String target = cmdArgs.get(3);
-                            COMPLETION_SPECS.put(target, scriptPath);
-                        }
-                    } else if (command.equals("jobs")) {
-                        int n = backgroundJobs.size();
-                        List<Job> remainingJobs = new ArrayList<>();
-                        for (int j = 0; j < n; j++) {
-                            Job job = backgroundJobs.get(j);
-                            String marker = " ";
-                            if (j == n - 1) {
-                                marker = "+";
-                            } else if (j == n - 2) {
-                                marker = "-";
-                            }
-                            boolean isAlive = job.process != null && job.process.isAlive();
-                            String status = isAlive ? "Running" : "Done";
-                            String trailing = isAlive ? " &" : "";
-                            out.printf("[%d]%s  %-24s%s%s\n", job.id, marker, status, job.command, trailing);
-                            if (isAlive) {
-                                remainingJobs.add(job);
-                            }
-                        }
-                        backgroundJobs.clear();
-                        backgroundJobs.addAll(remainingJobs);
-                    }
+                    executeBuiltin(pc, System.in, out, err, false);
                 } finally {
                     if (closeOut) {
                         out.close();
@@ -314,6 +226,23 @@ public class Main {
             }
         }
 
+        boolean hasBuiltin = false;
+        for (ParsedCommand pc : parsedList) {
+            if (BUILTINS.contains(pc.cmdArgs.get(0))) {
+                hasBuiltin = true;
+                break;
+            }
+        }
+
+        if (!hasBuiltin) {
+            executeExternalPipeline(parsedList);
+            return;
+        }
+
+        executeMixedPipeline(parsedList);
+    }
+
+    private static void executeExternalPipeline(List<ParsedCommand> parsedList) {
         List<ProcessBuilder> builders = new ArrayList<>();
         for (int i = 0; i < parsedList.size(); i++) {
             ParsedCommand pc = parsedList.get(i);
@@ -361,6 +290,322 @@ public class Main {
         } finally {
             setRawMode(true);
         }
+    }
+
+    private static void executeMixedPipeline(List<ParsedCommand> parsedList) {
+        int n = parsedList.size();
+        boolean[] isBuiltin = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            isBuiltin[i] = BUILTINS.contains(parsedList.get(i).cmdArgs.get(0));
+        }
+
+        Process[] processes = new Process[n];
+        Thread[] threads = new Thread[n];
+        List<Thread> pumpThreads = new ArrayList<>();
+        PipedInputStream[] builtinPipeIn = new PipedInputStream[n];
+        PipedOutputStream[] builtinPipeOut = new PipedOutputStream[n];
+
+        setRawMode(false);
+        try {
+            // 1. Start all external processes
+            for (int i = 0; i < n; i++) {
+                if (!isBuiltin[i]) {
+                    ParsedCommand pc = parsedList.get(i);
+                    ProcessBuilder pb = new ProcessBuilder(pc.cmdArgs);
+                    pb.directory(currentDir.toFile());
+
+                    if (i == 0) {
+                        pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+                    }
+
+                    if (i == n - 1) {
+                        if (pc.redirectOutFile != null) {
+                            Path outPath = resolvePath(pc.redirectOutFile);
+                            pb.redirectOutput(pc.appendOut ? ProcessBuilder.Redirect.appendTo(outPath.toFile()) : ProcessBuilder.Redirect.to(outPath.toFile()));
+                        } else {
+                            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                        }
+                    } else {
+                        if (pc.redirectOutFile != null) {
+                            Path outPath = resolvePath(pc.redirectOutFile);
+                            pb.redirectOutput(pc.appendOut ? ProcessBuilder.Redirect.appendTo(outPath.toFile()) : ProcessBuilder.Redirect.to(outPath.toFile()));
+                        }
+                    }
+
+                    if (pc.redirectErrFile != null) {
+                        Path errPath = resolvePath(pc.redirectErrFile);
+                        pb.redirectError(pc.appendErr ? ProcessBuilder.Redirect.appendTo(errPath.toFile()) : ProcessBuilder.Redirect.to(errPath.toFile()));
+                    } else {
+                        pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+                    }
+
+                    processes[i] = pb.start();
+                }
+            }
+
+            // 2. Set up inter-stage connections
+            for (int i = 0; i < n - 1; i++) {
+                if (!isBuiltin[i] && !isBuiltin[i + 1]) {
+                    if (parsedList.get(i).redirectOutFile == null) {
+                        Process pSrc = processes[i];
+                        Process pDst = processes[i + 1];
+                        Thread pump = new Thread(() -> {
+                            try (InputStream in = pSrc.getInputStream();
+                                 OutputStream out = pDst.getOutputStream()) {
+                                in.transferTo(out);
+                            } catch (IOException ignored) {
+                            }
+                        });
+                        pump.start();
+                        pumpThreads.add(pump);
+                    } else {
+                        try {
+                            processes[i + 1].getOutputStream().close();
+                        } catch (IOException ignored) {}
+                    }
+                } else if (isBuiltin[i] && isBuiltin[i + 1]) {
+                    if (parsedList.get(i).redirectOutFile == null) {
+                        PipedOutputStream pos = new PipedOutputStream();
+                        PipedInputStream pis = new PipedInputStream(pos, 65536);
+                        builtinPipeOut[i] = pos;
+                        builtinPipeIn[i + 1] = pis;
+                    }
+                } else if (isBuiltin[i] && !isBuiltin[i + 1]) {
+                    if (parsedList.get(i).redirectOutFile != null) {
+                        try {
+                            processes[i + 1].getOutputStream().close();
+                        } catch (IOException ignored) {}
+                    }
+                }
+            }
+
+            // 3. Start Builtin threads
+            for (int i = 0; i < n; i++) {
+                if (isBuiltin[i]) {
+                    ParsedCommand pc = parsedList.get(i);
+                    InputStream inStream;
+                    if (i == 0) {
+                        inStream = System.in;
+                    } else if (!isBuiltin[i - 1]) {
+                        if (parsedList.get(i - 1).redirectOutFile != null) {
+                            inStream = InputStream.nullInputStream();
+                        } else {
+                            inStream = processes[i - 1].getInputStream();
+                        }
+                    } else {
+                        inStream = builtinPipeIn[i] != null ? builtinPipeIn[i] : InputStream.nullInputStream();
+                    }
+
+                    PrintStream outStream;
+                    if (pc.redirectOutFile != null) {
+                        Path outPath = resolvePath(pc.redirectOutFile);
+                        outStream = new PrintStream(Files.newOutputStream(outPath,
+                                StandardOpenOption.CREATE,
+                                pc.appendOut ? StandardOpenOption.APPEND : StandardOpenOption.TRUNCATE_EXISTING,
+                                StandardOpenOption.WRITE));
+                    } else if (i == n - 1) {
+                        outStream = System.out;
+                    } else if (!isBuiltin[i + 1]) {
+                        outStream = new PrintStream(processes[i + 1].getOutputStream(), true);
+                    } else {
+                        outStream = builtinPipeOut[i] != null ? new PrintStream(builtinPipeOut[i], true) : new PrintStream(OutputStream.nullOutputStream());
+                    }
+
+                    PrintStream errStream;
+                    if (pc.redirectErrFile != null) {
+                        Path errPath = resolvePath(pc.redirectErrFile);
+                        errStream = new PrintStream(Files.newOutputStream(errPath,
+                                StandardOpenOption.CREATE,
+                                pc.appendErr ? StandardOpenOption.APPEND : StandardOpenOption.TRUNCATE_EXISTING,
+                                StandardOpenOption.WRITE));
+                    } else {
+                        errStream = System.err;
+                    }
+
+                    final InputStream finalIn = inStream;
+                    final PrintStream finalOut = outStream;
+                    final PrintStream finalErr = errStream;
+
+                    Thread t = new Thread(() -> {
+                        try {
+                            executeBuiltin(pc, finalIn, finalOut, finalErr, true);
+                        } finally {
+                            if (finalOut != null && finalOut != System.out) {
+                                finalOut.flush();
+                                finalOut.close();
+                            }
+                            if (finalIn != null && finalIn != System.in) {
+                                try {
+                                    finalIn.close();
+                                } catch (IOException ignored) {}
+                            }
+                            if (finalErr != null && finalErr != System.err) {
+                                finalErr.flush();
+                                finalErr.close();
+                            }
+                        }
+                    });
+                    threads[i] = t;
+                    t.start();
+                }
+            }
+
+            // 4. Wait for completion: wait on the last stage first
+            if (isBuiltin[n - 1]) {
+                if (threads[n - 1] != null) {
+                    threads[n - 1].join();
+                }
+            } else {
+                if (processes[n - 1] != null) {
+                    processes[n - 1].waitFor();
+                }
+            }
+
+            // 5. Unblock and clean up any remaining stages
+            for (int i = 0; i < n; i++) {
+                if (!isBuiltin[i] && processes[i] != null) {
+                    if (processes[i].isAlive()) {
+                        processes[i].destroy();
+                    }
+                    processes[i].waitFor();
+                }
+            }
+            for (int i = 0; i < n; i++) {
+                if (isBuiltin[i] && threads[i] != null) {
+                    threads[i].join();
+                }
+            }
+            for (Thread pt : pumpThreads) {
+                pt.join();
+            }
+        } catch (Exception ignored) {
+            for (Process p : processes) {
+                if (p != null && p.isAlive()) {
+                    p.destroy();
+                }
+            }
+        } finally {
+            setRawMode(true);
+        }
+    }
+
+    private static int executeBuiltin(ParsedCommand pc, InputStream in, PrintStream out, PrintStream err, boolean inSubshell) {
+        List<String> cmdArgs = pc.cmdArgs;
+        if (cmdArgs.isEmpty()) {
+            return 0;
+        }
+        String command = cmdArgs.get(0);
+        if (command.equals("exit")) {
+            int exitCode = 0;
+            if (cmdArgs.size() > 1) {
+                try {
+                    exitCode = Integer.parseInt(cmdArgs.get(1));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+            if (!inSubshell) {
+                if (out != System.out) {
+                    out.close();
+                }
+                if (err != System.err) {
+                    err.close();
+                }
+                setRawMode(false);
+                System.exit(exitCode);
+            }
+            return exitCode;
+        } else if (command.equals("echo")) {
+            String output = String.join(" ", cmdArgs.subList(1, cmdArgs.size()));
+            out.println(output);
+            out.flush();
+        } else if (command.equals("type")) {
+            if (cmdArgs.size() > 1) {
+                String target = cmdArgs.get(1);
+                if (BUILTINS.contains(target)) {
+                    out.println(target + " is a shell builtin");
+                } else {
+                    Path executable = findExecutable(target);
+                    if (executable != null) {
+                        out.println(target + " is " + executable);
+                    } else {
+                        out.println(target + ": not found");
+                    }
+                }
+            }
+            out.flush();
+        } else if (command.equals("pwd")) {
+            out.println(currentDir);
+            out.flush();
+        } else if (command.equals("cd")) {
+            String home = System.getenv("HOME");
+            if (home == null || home.isEmpty()) {
+                home = System.getProperty("user.home");
+            }
+            String targetPath = cmdArgs.size() > 1 ? cmdArgs.get(1) : home;
+            if (targetPath.equals("~")) {
+                targetPath = home;
+            } else if (targetPath.startsWith("~/")) {
+                targetPath = home + targetPath.substring(1);
+            }
+
+            Path target = currentDir.resolve(targetPath).normalize();
+            if (Files.isDirectory(target)) {
+                if (!inSubshell) {
+                    currentDir = target;
+                }
+            } else {
+                err.println("cd: " + targetPath + ": No such file or directory");
+                err.flush();
+                return 1;
+            }
+        } else if (command.equals("complete")) {
+            if (cmdArgs.size() >= 3 && cmdArgs.get(1).equals("-p")) {
+                String target = cmdArgs.get(2);
+                if (COMPLETION_SPECS.containsKey(target)) {
+                    out.println("complete -C '" + COMPLETION_SPECS.get(target) + "' " + target);
+                } else {
+                    err.println("complete: " + target + ": no completion specification");
+                }
+            } else if (!inSubshell) {
+                if (cmdArgs.size() >= 3 && cmdArgs.get(1).equals("-r")) {
+                    String target = cmdArgs.get(2);
+                    COMPLETION_SPECS.remove(target);
+                } else if (cmdArgs.size() >= 4 && cmdArgs.get(1).equals("-C")) {
+                    String scriptPath = cmdArgs.get(2);
+                    String target = cmdArgs.get(3);
+                    COMPLETION_SPECS.put(target, scriptPath);
+                }
+            }
+            out.flush();
+            err.flush();
+        } else if (command.equals("jobs")) {
+            synchronized (backgroundJobs) {
+                int n = backgroundJobs.size();
+                List<Job> remainingJobs = new ArrayList<>();
+                for (int j = 0; j < n; j++) {
+                    Job job = backgroundJobs.get(j);
+                    String marker = " ";
+                    if (j == n - 1) {
+                        marker = "+";
+                    } else if (j == n - 2) {
+                        marker = "-";
+                    }
+                    boolean isAlive = job.process != null && job.process.isAlive();
+                    String status = isAlive ? "Running" : "Done";
+                    String trailing = isAlive ? " &" : "";
+                    out.printf("[%d]%s  %-24s%s%s\n", job.id, marker, status, job.command, trailing);
+                    if (isAlive) {
+                        remainingJobs.add(job);
+                    }
+                }
+                if (!inSubshell) {
+                    backgroundJobs.clear();
+                    backgroundJobs.addAll(remainingJobs);
+                }
+            }
+            out.flush();
+        }
+        return 0;
     }
 
     private static ParsedCommand parseRedirection(List<String> tokens) throws Exception {
