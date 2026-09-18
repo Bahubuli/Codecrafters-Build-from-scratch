@@ -1,9 +1,13 @@
 import com.google.gson.Gson;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,6 +20,26 @@ import java.util.Map;
 
 public class Main {
   private static final Gson gson = new Gson();
+
+  static class Peer {
+    final String ip;
+    final int port;
+
+    Peer(String ip, int port) {
+      this.ip = ip;
+      this.port = port;
+    }
+  }
+
+  static class PeerMessage {
+    final int id;
+    final byte[] payload;
+
+    PeerMessage(int id, byte[] payload) {
+      this.id = id;
+      this.payload = payload;
+    }
+  }
 
   public static void main(String[] args) throws Exception {
     if (args.length < 2) {
@@ -77,40 +101,9 @@ public class Main {
       MessageDigest md = MessageDigest.getInstance("SHA-1");
       byte[] infoHashBytes = md.digest(rawInfoBytes);
 
-      String peerId = "00112233445566778899";
-      char separator = announce.contains("?") ? '&' : '?';
-      String url = announce + separator
-          + "info_hash=" + urlEncodeBytes(infoHashBytes)
-          + "&peer_id=" + peerId
-          + "&port=6881"
-          + "&uploaded=0"
-          + "&downloaded=0"
-          + "&left=" + length
-          + "&compact=1";
-
-      HttpClient client = HttpClient.newHttpClient();
-      HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
-      HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
-
-      ByteBencodeParser respParser = new ByteBencodeParser(response.body());
-      @SuppressWarnings("unchecked")
-      Map<String, Object> trackerResponse = (Map<String, Object>) respParser.parse();
-
-      Object peersObj = trackerResponse.get("peers");
-      if (peersObj instanceof byte[]) {
-        byte[] peersBytes = (byte[]) peersObj;
-        for (int i = 0; i + 6 <= peersBytes.length; i += 6) {
-          String ip = (peersBytes[i] & 0xFF) + "." + (peersBytes[i + 1] & 0xFF) + "."
-                    + (peersBytes[i + 2] & 0xFF) + "." + (peersBytes[i + 3] & 0xFF);
-          int port = ((peersBytes[i + 4] & 0xFF) << 8) | (peersBytes[i + 5] & 0xFF);
-          System.out.println(ip + ":" + port);
-        }
-      } else if (peersObj instanceof List) {
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> peersList = (List<Map<String, Object>>) peersObj;
-        for (Map<String, Object> p : peersList) {
-          System.out.println(p.get("ip") + ":" + p.get("port"));
-        }
+      List<Peer> peers = getPeers(announce, infoHashBytes, length);
+      for (Peer p : peers) {
+        System.out.println(p.ip + ":" + p.port);
       }
     } else if ("handshake".equals(command)) {
       String torrentFilePath = args[1];
@@ -147,9 +140,216 @@ public class Main {
         byte[] peerId = Arrays.copyOfRange(response, 48, 68);
         System.out.println("Peer ID: " + bytesToHex(peerId));
       }
+    } else if ("download_piece".equals(command)) {
+      String outputPath = null;
+      String torrentFilePath = null;
+      int pieceIndex = -1;
+      for (int i = 1; i < args.length; i++) {
+        if ("-o".equals(args[i]) && i + 1 < args.length) {
+          outputPath = args[++i];
+        } else if (torrentFilePath == null) {
+          torrentFilePath = args[i];
+        } else {
+          pieceIndex = Integer.parseInt(args[i]);
+        }
+      }
+
+      byte[] torrentBytes = Files.readAllBytes(Path.of(torrentFilePath));
+      ByteBencodeParser parser = new ByteBencodeParser(torrentBytes);
+      @SuppressWarnings("unchecked")
+      Map<String, Object> torrent = (Map<String, Object>) parser.parse();
+      String announce = (String) torrent.get("announce");
+      @SuppressWarnings("unchecked")
+      Map<String, Object> info = (Map<String, Object>) torrent.get("info");
+      long totalLength = (Long) info.get("length");
+      long pieceLength = (Long) info.get("piece length");
+      byte[] pieces = (byte[]) info.get("pieces");
+
+      byte[] rawInfoBytes = parser.getRawInfoBytes();
+      MessageDigest md = MessageDigest.getInstance("SHA-1");
+      byte[] infoHashBytes = md.digest(rawInfoBytes);
+
+      int totalPieces = (int) Math.ceil((double) totalLength / pieceLength);
+      int pieceSize;
+      if (pieceIndex == totalPieces - 1) {
+        pieceSize = (int) (totalLength - (long) pieceIndex * pieceLength);
+      } else {
+        pieceSize = (int) pieceLength;
+      }
+
+      List<Peer> peers = getPeers(announce, infoHashBytes, totalLength);
+      if (peers.isEmpty()) {
+        throw new RuntimeException("No peers discovered from tracker");
+      }
+
+      byte[] pieceData = null;
+      for (Peer peer : peers) {
+        try {
+          pieceData = downloadPieceFromPeer(peer, pieceIndex, pieceSize, infoHashBytes);
+          if (pieceData != null) {
+            break;
+          }
+        } catch (Exception e) {
+          // Try next peer
+        }
+      }
+
+      if (pieceData == null) {
+        throw new RuntimeException("Failed to download piece " + pieceIndex + " from any peer");
+      }
+
+      // Verify SHA-1 hash of the piece
+      byte[] expectedPieceHash = Arrays.copyOfRange(pieces, pieceIndex * 20, (pieceIndex + 1) * 20);
+      byte[] actualPieceHash = MessageDigest.getInstance("SHA-1").digest(pieceData);
+      if (!Arrays.equals(expectedPieceHash, actualPieceHash)) {
+        throw new RuntimeException("Piece SHA-1 hash mismatch!");
+      }
+
+      Path outPath = Path.of(outputPath);
+      if (outPath.getParent() != null) {
+        Files.createDirectories(outPath.getParent());
+      }
+      Files.write(outPath, pieceData);
+      System.out.println("Piece " + pieceIndex + " downloaded to " + outputPath + ".");
     } else {
       System.out.println("Unknown command: " + command);
     }
+  }
+
+  static byte[] downloadPieceFromPeer(Peer peer, int pieceIndex, int pieceSize, byte[] infoHashBytes) throws Exception {
+    try (Socket socket = new Socket(peer.ip, peer.port)) {
+      socket.setSoTimeout(15000);
+      OutputStream out = socket.getOutputStream();
+      InputStream in = socket.getInputStream();
+
+      byte[] handshake = new byte[68];
+      handshake[0] = 19;
+      byte[] protocolBytes = "BitTorrent protocol".getBytes(StandardCharsets.ISO_8859_1);
+      System.arraycopy(protocolBytes, 0, handshake, 1, 19);
+      System.arraycopy(infoHashBytes, 0, handshake, 28, 20);
+      byte[] myPeerId = "-PC0001-012345678901".getBytes(StandardCharsets.ISO_8859_1);
+      System.arraycopy(myPeerId, 0, handshake, 48, 20);
+
+      out.write(handshake);
+      out.flush();
+
+      byte[] peerHandshake = in.readNBytes(68);
+      if (peerHandshake.length < 68) {
+        throw new IOException("Handshake failed: expected 68 bytes, got " + peerHandshake.length);
+      }
+
+      // Read until we receive unchoke (ID 1)
+      // Send interested (ID 2)
+      byte[] interestedMsg = new byte[] { 0, 0, 0, 1, 2 };
+      out.write(interestedMsg);
+      out.flush();
+
+      while (true) {
+        PeerMessage m = readMessage(in);
+        if (m.id == 1) { // unchoke
+          break;
+        }
+      }
+
+      byte[] pieceData = new byte[pieceSize];
+      int blockSize = 16384;
+      int numBlocks = (int) Math.ceil((double) pieceSize / blockSize);
+
+      for (int b = 0; b < numBlocks; b++) {
+        int begin = b * blockSize;
+        int blockLen = Math.min(blockSize, pieceSize - begin);
+
+        ByteBuffer req = ByteBuffer.allocate(17);
+        req.putInt(13); // length prefix: 13
+        req.put((byte) 6); // message ID: 6 (request)
+        req.putInt(pieceIndex);
+        req.putInt(begin);
+        req.putInt(blockLen);
+
+        out.write(req.array());
+        out.flush();
+
+        PeerMessage pieceMsg;
+        while (true) {
+          pieceMsg = readMessage(in);
+          if (pieceMsg.id == 7) {
+            break;
+          }
+        }
+
+        int pBegin = ByteBuffer.wrap(pieceMsg.payload, 4, 4).getInt();
+        int dataLen = pieceMsg.payload.length - 8;
+        System.arraycopy(pieceMsg.payload, 8, pieceData, pBegin, dataLen);
+      }
+
+      return pieceData;
+    }
+  }
+
+  static PeerMessage readMessage(InputStream in) throws IOException {
+    while (true) {
+      byte[] lenBytes = in.readNBytes(4);
+      if (lenBytes.length < 4) {
+        throw new IOException("Unexpected EOF reading message length");
+      }
+      int length = ((lenBytes[0] & 0xFF) << 24)
+                 | ((lenBytes[1] & 0xFF) << 16)
+                 | ((lenBytes[2] & 0xFF) << 8)
+                 | (lenBytes[3] & 0xFF);
+      if (length == 0) {
+        // Keep-alive message
+        continue;
+      }
+      int id = in.read();
+      if (id == -1) {
+        throw new IOException("Unexpected EOF reading message ID");
+      }
+      byte[] payload = in.readNBytes(length - 1);
+      if (payload.length < length - 1) {
+        throw new IOException("Unexpected EOF reading message payload");
+      }
+      return new PeerMessage(id, payload);
+    }
+  }
+
+  static List<Peer> getPeers(String announce, byte[] infoHashBytes, long length) throws Exception {
+    String peerId = "-PC0001-012345678901";
+    char separator = announce.contains("?") ? '&' : '?';
+    String url = announce + separator
+        + "info_hash=" + urlEncodeBytes(infoHashBytes)
+        + "&peer_id=" + peerId
+        + "&port=6881"
+        + "&uploaded=0"
+        + "&downloaded=0"
+        + "&left=" + length
+        + "&compact=1";
+
+    HttpClient client = HttpClient.newHttpClient();
+    HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
+    HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+
+    ByteBencodeParser respParser = new ByteBencodeParser(response.body());
+    @SuppressWarnings("unchecked")
+    Map<String, Object> trackerResponse = (Map<String, Object>) respParser.parse();
+
+    List<Peer> peers = new ArrayList<>();
+    Object peersObj = trackerResponse.get("peers");
+    if (peersObj instanceof byte[]) {
+      byte[] peersBytes = (byte[]) peersObj;
+      for (int i = 0; i + 6 <= peersBytes.length; i += 6) {
+        String ip = (peersBytes[i] & 0xFF) + "." + (peersBytes[i + 1] & 0xFF) + "."
+                  + (peersBytes[i + 2] & 0xFF) + "." + (peersBytes[i + 3] & 0xFF);
+        int port = ((peersBytes[i + 4] & 0xFF) << 8) | (peersBytes[i + 5] & 0xFF);
+        peers.add(new Peer(ip, port));
+      }
+    } else if (peersObj instanceof List) {
+      @SuppressWarnings("unchecked")
+      List<Map<String, Object>> peersList = (List<Map<String, Object>>) peersObj;
+      for (Map<String, Object> p : peersList) {
+        peers.add(new Peer((String) p.get("ip"), ((Long) p.get("port")).intValue()));
+      }
+    }
+    return peers;
   }
 
   static Object decodeBencode(String bencodedString) {
