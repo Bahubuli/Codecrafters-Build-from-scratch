@@ -1161,25 +1161,39 @@ public class Main {
                 } else if (c == '\"') {
                     inDoubleQuote = false;
                 } else if (c == '$') {
-                    int j = i + 1;
-                    if (j < input.length() && ((input.charAt(j) >= 'a' && input.charAt(j) <= 'z') || (input.charAt(j) >= 'A' && input.charAt(j) <= 'Z') || input.charAt(j) == '_')) {
-                        j++;
-                        while (j < input.length()) {
-                            char nextC = input.charAt(j);
-                            if ((nextC >= 'a' && nextC <= 'z') || (nextC >= 'A' && nextC <= 'Z') || (nextC >= '0' && nextC <= '9') || nextC == '_') {
-                                j++;
-                            } else {
-                                break;
+                    if (i + 1 < input.length() && input.charAt(i + 1) == '{') {
+                        int closeIdx = input.indexOf('}', i + 2);
+                        if (closeIdx != -1) {
+                            String varName = input.substring(i + 2, closeIdx);
+                            String val = SHELL_VARIABLES.containsKey(varName) ? SHELL_VARIABLES.get(varName) : System.getenv(varName);
+                            if (val != null) {
+                                current.append(val);
                             }
+                            i = closeIdx;
+                        } else {
+                            current.append(c);
                         }
-                        String varName = input.substring(i + 1, j);
-                        String val = SHELL_VARIABLES.containsKey(varName) ? SHELL_VARIABLES.get(varName) : System.getenv(varName);
-                        if (val != null) {
-                            current.append(val);
-                        }
-                        i = j - 1;
                     } else {
-                        current.append(c);
+                        int j = i + 1;
+                        if (j < input.length() && ((input.charAt(j) >= 'a' && input.charAt(j) <= 'z') || (input.charAt(j) >= 'A' && input.charAt(j) <= 'Z') || input.charAt(j) == '_')) {
+                            j++;
+                            while (j < input.length()) {
+                                char nextC = input.charAt(j);
+                                if ((nextC >= 'a' && nextC <= 'z') || (nextC >= 'A' && nextC <= 'Z') || (nextC >= '0' && nextC <= '9') || nextC == '_') {
+                                    j++;
+                                } else {
+                                    break;
+                                }
+                            }
+                            String varName = input.substring(i + 1, j);
+                            String val = SHELL_VARIABLES.containsKey(varName) ? SHELL_VARIABLES.get(varName) : System.getenv(varName);
+                            if (val != null) {
+                                current.append(val);
+                            }
+                            i = j - 1;
+                        } else {
+                            current.append(c);
+                        }
                     }
                 } else {
                     current.append(c);
@@ -1201,27 +1215,43 @@ public class Main {
                     inDoubleQuote = true;
                     hasToken = true;
                 } else if (c == '$') {
-                    int j = i + 1;
-                    if (j < input.length() && ((input.charAt(j) >= 'a' && input.charAt(j) <= 'z') || (input.charAt(j) >= 'A' && input.charAt(j) <= 'Z') || input.charAt(j) == '_')) {
-                        j++;
-                        while (j < input.length()) {
-                            char nextC = input.charAt(j);
-                            if ((nextC >= 'a' && nextC <= 'z') || (nextC >= 'A' && nextC <= 'Z') || (nextC >= '0' && nextC <= '9') || nextC == '_') {
-                                j++;
-                            } else {
-                                break;
+                    if (i + 1 < input.length() && input.charAt(i + 1) == '{') {
+                        int closeIdx = input.indexOf('}', i + 2);
+                        if (closeIdx != -1) {
+                            String varName = input.substring(i + 2, closeIdx);
+                            String val = SHELL_VARIABLES.containsKey(varName) ? SHELL_VARIABLES.get(varName) : System.getenv(varName);
+                            if (val != null && !val.isEmpty()) {
+                                current.append(val);
+                                hasToken = true;
                             }
-                        }
-                        String varName = input.substring(i + 1, j);
-                        String val = SHELL_VARIABLES.containsKey(varName) ? SHELL_VARIABLES.get(varName) : System.getenv(varName);
-                        if (val != null && !val.isEmpty()) {
-                            current.append(val);
+                            i = closeIdx;
+                        } else {
+                            current.append(c);
                             hasToken = true;
                         }
-                        i = j - 1;
                     } else {
-                        current.append(c);
-                        hasToken = true;
+                        int j = i + 1;
+                        if (j < input.length() && ((input.charAt(j) >= 'a' && input.charAt(j) <= 'z') || (input.charAt(j) >= 'A' && input.charAt(j) <= 'Z') || input.charAt(j) == '_')) {
+                            j++;
+                            while (j < input.length()) {
+                                char nextC = input.charAt(j);
+                                if ((nextC >= 'a' && nextC <= 'z') || (nextC >= 'A' && nextC <= 'Z') || (nextC >= '0' && nextC <= '9') || nextC == '_') {
+                                    j++;
+                                } else {
+                                    break;
+                                }
+                            }
+                            String varName = input.substring(i + 1, j);
+                            String val = SHELL_VARIABLES.containsKey(varName) ? SHELL_VARIABLES.get(varName) : System.getenv(varName);
+                            if (val != null && !val.isEmpty()) {
+                                current.append(val);
+                                hasToken = true;
+                            }
+                            i = j - 1;
+                        } else {
+                            current.append(c);
+                            hasToken = true;
+                        }
                     }
                 } else if (c == '|') {
                     if (hasToken) {
