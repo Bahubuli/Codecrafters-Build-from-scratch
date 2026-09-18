@@ -64,13 +64,30 @@ public class Main {
         }
     }
 
+    static class NegativeGroupToken implements Token {
+        private final Set<Character> chars;
+        public NegativeGroupToken(String characters) {
+            this.chars = new HashSet<>();
+            for (char c : characters.toCharArray()) {
+                this.chars.add(c);
+            }
+        }
+        @Override
+        public boolean matches(char c) {
+            return !chars.contains(c);
+        }
+    }
+
     public static boolean matchPattern(String inputLine, String pattern) {
         Token token;
         if (pattern.equals("\\d")) {
             token = new DigitToken();
         } else if (pattern.equals("\\w")) {
             token = new WordToken();
-        } else if (pattern.startsWith("[") && pattern.endsWith("]") && !pattern.startsWith("[^")) {
+        } else if (pattern.startsWith("[^") && pattern.endsWith("]")) {
+            String chars = pattern.substring(2, pattern.length() - 1);
+            token = new NegativeGroupToken(chars);
+        } else if (pattern.startsWith("[") && pattern.endsWith("]")) {
             String chars = pattern.substring(1, pattern.length() - 1);
             token = new PositiveGroupToken(chars);
         } else if (pattern.length() == 1) {
