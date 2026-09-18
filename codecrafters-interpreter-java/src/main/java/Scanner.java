@@ -83,6 +83,7 @@ public class Scanner {
             case ' ':
             case '\r':
             case '\t':
+                // Ignore whitespace.
                 break;
             case '\n':
                 line++;
