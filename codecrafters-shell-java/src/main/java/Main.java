@@ -224,9 +224,15 @@ public class Main {
                             COMPLETION_SPECS.put(target, scriptPath);
                         }
                     } else if (command.equals("jobs")) {
-                        for (int j = 0; j < backgroundJobs.size(); j++) {
+                        int n = backgroundJobs.size();
+                        for (int j = 0; j < n; j++) {
                             Job job = backgroundJobs.get(j);
-                            String marker = "+";
+                            String marker = " ";
+                            if (j == n - 1) {
+                                marker = "+";
+                            } else if (j == n - 2) {
+                                marker = "-";
+                            }
                             out.printf("[%d]%s  %-24s%s &\n", job.id, marker, "Running", job.command);
                         }
                     }
