@@ -512,8 +512,31 @@ public class Main {
         out.flush();
       } else {
         String channel = parts[1];
+        String message = parts[2];
         Set<ClientContext> subs = channelSubscribers.get(channel);
         int count = (subs != null) ? subs.size() : 0;
+        if (subs != null) {
+          byte[] chanBytes = channel.getBytes(StandardCharsets.UTF_8);
+          byte[] msgBytes = message.getBytes(StandardCharsets.UTF_8);
+          StringBuilder frame = new StringBuilder();
+          frame.append("*3\r\n");
+          frame.append("$7\r\nmessage\r\n");
+          frame.append("$").append(chanBytes.length).append("\r\n").append(channel).append("\r\n");
+          frame.append("$").append(msgBytes.length).append("\r\n").append(message).append("\r\n");
+          byte[] frameBytes = frame.toString().getBytes(StandardCharsets.UTF_8);
+
+          for (ClientContext sub : subs) {
+            if (sub.out != null) {
+              try {
+                synchronized (sub.out) {
+                  sub.out.write(frameBytes);
+                  sub.out.flush();
+                }
+              } catch (IOException ignored) {
+              }
+            }
+          }
+        }
         out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
         out.flush();
       }
@@ -1800,6 +1823,7 @@ public class Main {
           OutputStream out = null;
           try {
             out = clientSocket.getOutputStream();
+            clientCtx.out = out;
             InputStream in = clientSocket.getInputStream();
             BufferedReader reader = new BufferedReader(new InputStreamReader(in));
             boolean[] inTx = new boolean[]{false};
