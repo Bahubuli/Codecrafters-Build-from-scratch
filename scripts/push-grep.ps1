@@ -44,11 +44,12 @@ Get-ChildItem -Path $sourceDir -Recurse | ForEach-Object {
 
 $diff = git -C $grepRepoDir status --porcelain
 if (-not $diff) {
-    Write-Host "No grep changes to submit to CodeCrafters."
-    exit 0
+    Write-Host "No file diff detected. Creating empty commit to advance stage..."
+    git -C $grepRepoDir commit --allow-empty -m $CommitMessage
+} else {
+    git -C $grepRepoDir add -A
+    git -C $grepRepoDir commit -m $CommitMessage
 }
 
-git -C $grepRepoDir add -A
-git -C $grepRepoDir commit -m $CommitMessage
 git -C $grepRepoDir push origin master
 Write-Host "Successfully submitted to CodeCrafters!" -ForegroundColor Green
