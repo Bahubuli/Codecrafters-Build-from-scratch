@@ -699,8 +699,49 @@ public class Main {
     private static String readLineWithCompletion() throws IOException {
         StringBuilder line = new StringBuilder();
         int consecutiveTabs = 0;
+        int historyIndex = commandHistory.size();
+        String savedCurrentLine = "";
+
         while (true) {
             int ch = System.in.read();
+            if (ch == 27) { // ESC sequence (e.g. arrow keys)
+                int next1 = System.in.read();
+                if (next1 == '[') {
+                    int next2 = System.in.read();
+                    if (next2 == 'A') { // UP arrow
+                        if (historyIndex > 0) {
+                            if (historyIndex == commandHistory.size()) {
+                                savedCurrentLine = line.toString();
+                            }
+                            historyIndex--;
+                            String target = commandHistory.get(historyIndex);
+                            // Clear current line on screen
+                            while (line.length() > 0) {
+                                System.out.print("\b \b");
+                                line.deleteCharAt(line.length() - 1);
+                            }
+                            line.append(target);
+                            System.out.print(target);
+                            System.out.flush();
+                        }
+                        continue;
+                    } else if (next2 == 'B') { // DOWN arrow
+                        if (historyIndex < commandHistory.size()) {
+                            historyIndex++;
+                            String target = (historyIndex == commandHistory.size()) ? savedCurrentLine : commandHistory.get(historyIndex);
+                            while (line.length() > 0) {
+                                System.out.print("\b \b");
+                                line.deleteCharAt(line.length() - 1);
+                            }
+                            line.append(target);
+                            System.out.print(target);
+                            System.out.flush();
+                        }
+                        continue;
+                    }
+                }
+                continue;
+            }
             if (ch == -1) {
                 return line.length() > 0 ? line.toString() : null;
             }
