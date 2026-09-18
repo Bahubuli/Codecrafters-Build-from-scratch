@@ -10,6 +10,7 @@ This monorepo tracks deep-dive implementations of real-world infrastructure syst
 | :--- | :--- | :--- | :--- | :--- |
 | **Build Your Own Redis** | [`codecrafters-redis-java`](codecrafters-redis-java/) | Java 21 | **100% Completed** (123/123 Stages) | [Redis Challenge](https://app.codecrafters.io/courses/redis/overview) |
 | **Build Your Own HTTP Server** | [`codecrafters-http-server-java`](codecrafters-http-server-java/) | Java 21 | **100% Completed** (14/14 Stages) | [HTTP Server Challenge](https://app.codecrafters.io/courses/http-server/overview) |
+| **Build Your Own DNS Server** | [`codecrafters-dns-server-java`](codecrafters-dns-server-java/) | Java 21 | **100% Completed** (8/8 Stages) | [DNS Server Challenge](https://app.codecrafters.io/courses/dns-server/overview) |
 | **Build Your Own Shell** | [`codecrafters-shell-java`](codecrafters-shell-java/) | Java 21 | Available | [Shell Challenge](https://app.codecrafters.io/courses/shell/overview) |
 | **Build Your Own Interpreter** | [`codecrafters-interpreter-java`](codecrafters-interpreter-java/) | Java 21 | **In Progress** | [Interpreter Challenge](https://app.codecrafters.io/courses/interpreter/overview) |
 | **Build Your Own Grep** | [`codecrafters-grep-java`](codecrafters-grep-java/) | Java 21 | **In Progress** | [Grep Challenge](https://app.codecrafters.io/courses/grep/overview) |
@@ -25,11 +26,11 @@ Full-featured, protocol-compliant in-memory key-value store and streaming engine
 - **Streams**: XADD (fully/partially auto-generated & explicit IDs, validation), XRANGE (bounded, `-`, `+`), XREAD (single/multi-stream, blocking with timeouts and `$` latest-id tracking).
 - **Transactions & Optimistic Locking**: MULTI, EXEC, DISCARD, WATCH (tracking modifications, missing keys, multi-key watches, UNWATCH, auto-unwatch on EXEC/DISCARD).
 - **Replication Engine**: Full duplex master-replica handshakes (PING, REPLCONF listening-port, REPLCONF capa, PSYNC ? -1), empty RDB snapshot transfer, real-time command propagation, REPLCONF ACK offset synchronization, WAIT command barrier.
-- **Persistence (RDB & AOF)**: Binary RDB parsing (string encoding, timestamps, length-prefixed bytes, expired key filtration), AOF directory & manifest management, write filtering, crash recovery replaying.
+- **Persistence (RDB & AOF)**: Binary RDB parsing (string encoding, timestamps, length-prefixed bytes, expired key filtration), AOF directory & manifest management, write filtering, crash recovery replaying).
 - **Pub/Sub Messaging**: SUBSCRIBE, UNSUBSCRIBE, PUBLISH, state isolation (connection subscribed mode enforcement).
 - **Sorted Sets (ZSET)**: ZADD, ZRANK, ZRANGE, ZCOUNT, ZSCORE, ZREM (composite sorted order, float scores).
 - **Geospatial Indexes (GEO)**: GEOADD, GEOPOS, GEODIST, GEOSEARCH (Haversine formula, 52-bit integer geohash encoding/decoding, search by radius).
-- **Security & Access Control (ACL)**: ACL WHOAMI, ACL GETUSER, `nopass` flag, SHA-256 hashed password authentication, AUTH command, connection authentication enforcement.
+- **Security & Access Control (ACL)**: ACL WHOAMI, ACL GETUSER, `nopass` flag, SHA-256 hashed password authentication, AUTH command, connection authentication enforcement).
 - **Bitmaps**: SETBIT, GETBIT, BITCOUNT, BITOP (AND, OR, XOR, NOT) with zero-padding and bitwise alignment.
 - **Pedagogical Archive**: All 123 stages accompanied by deep architectural documentation in [`codecrafters-redis-java/Tasks/`](codecrafters-redis-java/Tasks/).
 
@@ -57,7 +58,29 @@ Production-grade, RFC-compliant HTTP/1.1 web server built from raw TCP sockets:
 
 ---
 
-### 3. Build Your Own Shell (`codecrafters-shell-java`)
+### 3. Build Your Own DNS Server (`codecrafters-dns-server-java`)
+Full-featured, RFC 1035 compliant UDP DNS forwarding and resolution server built from raw datagram sockets:
+- **UDP Socket Networking**:
+  - Binding to UDP port 2053 and listening for DNS queries using Java NIO `ByteBuffer` and raw `DatagramPacket`.
+- **DNS Wire Format Header Serialization & Parsing**:
+  - 12-byte binary header manipulation (ID, QR, OPCODE, AA, TC, RD, RA, Z, RCODE, QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT).
+  - Bitfield packing and masking across 16-bit flags.
+  - Dynamic query reflection: echoing client query ID, opcode, recursion desired bit, and setting proper error response codes (`RCODE 4` for unsupported opcodes).
+- **Question & Answer Framing**:
+  - Variable-length length-prefixed label sequence encoding and decoding (`<len><label>...<0x00>`).
+  - Resource Record synthesis for `A` records (`TYPE 1`, `CLASS 1`, 32-bit big-endian TTL, 16-bit RDLENGTH, 4-byte IPv4 RDATA).
+- **DNS Compression Pointer Decompression**:
+  - Resolution of 14-bit compression pointers (`0xC0` mask) referencing prior offsets in the message.
+  - Composite pointer chaining, cursor preservation, and circular loop protection.
+- **DNS Forwarding Proxy & Multiplexing**:
+  - Upstream resolver integration via `--resolver <ip:port>`.
+  - Query demultiplexing: splitting multi-question incoming queries into isolated single-question datagrams for strict upstream resolvers.
+  - Upstream response deserialization, record extraction, and response multiplexing into a single downstream reply datagram.
+- **Pedagogical Archive**: All 8 stages fully documented in [`codecrafters-dns-server-java/Tasks/`](codecrafters-dns-server-java/Tasks/).
+
+---
+
+### 4. Build Your Own Shell (`codecrafters-shell-java`)
 POSIX-compliant command-line interpreter:
 - Built-in commands (`echo`, `type`, `exit`, `pwd`, `cd`).
 - `PATH` resolution and external program execution.
@@ -67,7 +90,7 @@ POSIX-compliant command-line interpreter:
 
 ---
 
-### 4. Build Your Own Interpreter (`codecrafters-interpreter-java`)
+### 5. Build Your Own Interpreter (`codecrafters-interpreter-java`)
 Full-featured tree-walk interpreter for the Lox programming language (Crafting Interpreters):
 - **Scanning & Lexical Analysis**: Regular expressions, token streams, lexemes, literal preservation, line tracking, error reporting.
 - **Syntactic Analysis (Parsing)**: Context-free grammars, recursive descent parsing, operator precedence and associativity, AST nodes.
@@ -79,7 +102,7 @@ Full-featured tree-walk interpreter for the Lox programming language (Crafting I
 
 ---
 
-### 5. Build Your Own Grep (`codecrafters-grep-java`)
+### 6. Build Your Own Grep (`codecrafters-grep-java`)
 Recursive-descent / backtracking regular expression matcher and grep CLI from first principles:
 - **Literals & Character Classes**: Single characters, `\d` (digits), `\w` (word characters).
 - **Character Groups**: Positive groups (`[abc]`), negative groups (`[^abc]`).
@@ -99,6 +122,7 @@ Recursive-descent / backtracking regular expression matcher and grep CLI from fi
 - **CodeCrafters Remotes**:
   - `redis-codecrafters`: `https://git.codecrafters.io/9300847fe0a03ad5`
   - `http-codecrafters`: `https://git.codecrafters.io/a660f48206a74329`
+  - `dns-codecrafters`: `https://git.codecrafters.io/5bb057cfc4420466`
   - `shell-codecrafters`: `https://git.codecrafters.io/d44f4c8a35fb46bd`
   - `interpreter-codecrafters`: `https://git.codecrafters.io/45148298d18ce52a`
   - `grep-codecrafters`: `https://git.codecrafters.io/6bc6999955a9e704`
@@ -113,6 +137,9 @@ powershell -File scripts/push-redis.ps1 "Stage NN: <Title>"
 
 # Submit HTTP Server changes
 powershell -File scripts/push-http.ps1 "Stage NN: <Title>"
+
+# Submit DNS Server changes
+powershell -File scripts/push-dns.ps1 "Stage NN: <Title>"
 
 # Submit Shell changes
 powershell -File scripts/push-shell.ps1 "Stage NN: <Title>"
