@@ -4,6 +4,8 @@ import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -109,7 +111,34 @@ public class Main {
         }
 
         ScanContext ctx = new ScanContext(query, columns, targetColIndices, whereColIndex);
-        traverseTableBtree(databaseFile, pageSize, targetTable.rootpage, ctx);
+
+        // Check if an index exists for the WHERE column
+        SchemaRow targetIndex = null;
+        if (query.whereColumn != null) {
+          for (SchemaRow row : schema) {
+            if ("index".equalsIgnoreCase(row.type) && row.tblName != null && row.tblName.equalsIgnoreCase(query.tableName)) {
+              String indexedCol = parseIndexedColumn(row.sql);
+              if (indexedCol != null && indexedCol.equalsIgnoreCase(query.whereColumn)) {
+                targetIndex = row;
+                break;
+              }
+            }
+          }
+        }
+
+        if (targetIndex != null) {
+          boolean noCase = targetIndex.sql != null && targetIndex.sql.toUpperCase().contains("NOCASE");
+          List<Long> matchedRowids = new ArrayList<>();
+          searchIndexBtree(databaseFile, pageSize, targetIndex.rootpage, query.whereValue, noCase, matchedRowids);
+
+          matchedRowids = new ArrayList<>(new LinkedHashSet<>(matchedRowids));
+          Collections.sort(matchedRowids);
+          for (long rowid : matchedRowids) {
+            findRowByRowid(databaseFile, pageSize, targetTable.rootpage, rowid, ctx);
+          }
+        } else {
+          traverseTableBtree(databaseFile, pageSize, targetTable.rootpage, ctx);
+        }
 
         if (query.isCount) {
           System.out.println(ctx.matchCount);
@@ -138,6 +167,248 @@ public class Main {
     }
   }
 
+  static String parseIndexedColumn(String indexSql) {
+    if (indexSql == null) return null;
+    int openParen = indexSql.lastIndexOf('(');
+    int closeParen = indexSql.lastIndexOf(')');
+    if (openParen == -1 || closeParen == -1 || openParen >= closeParen) {
+      return null;
+    }
+    String col = indexSql.substring(openParen + 1, closeParen).trim();
+    if (col.contains(",")) {
+      col = col.substring(0, col.indexOf(',')).trim();
+    }
+    String[] parts = col.split("\\s+");
+    col = parts[0];
+    return col.replaceAll("[\"'\\\\\\[\\\\\\]`]", "").trim();
+  }
+
+  static int compareValues(String a, String b, boolean noCase) {
+    if (a == null && b == null) return 0;
+    if (a == null) return -1;
+    if (b == null) return 1;
+    return noCase ? a.compareToIgnoreCase(b) : a.compareTo(b);
+  }
+
+  static void skipColumnValue(ByteBuffer buffer, long serialType) {
+    int size = getSerialTypeSize(serialType);
+    buffer.position(buffer.position() + size);
+  }
+
+  static String readIndexColumnValue(ByteBuffer buffer, long serialType) {
+    if (serialType == 0) return null;
+    if (serialType >= 1 && serialType <= 6) {
+      return String.valueOf(readInteger(buffer, serialType));
+    }
+    if (serialType == 7) {
+      return String.valueOf(buffer.getDouble());
+    }
+    if (serialType == 8) return "0";
+    if (serialType == 9) return "1";
+    if (serialType >= 12 && serialType % 2 == 0) {
+      int size = (int) ((serialType - 12) / 2);
+      byte[] bytes = new byte[size];
+      buffer.get(bytes);
+      return new String(bytes, StandardCharsets.UTF_8);
+    }
+    if (serialType >= 13 && serialType % 2 != 0) {
+      int size = (int) ((serialType - 13) / 2);
+      byte[] bytes = new byte[size];
+      buffer.get(bytes);
+      return new String(bytes, StandardCharsets.UTF_8);
+    }
+    return null;
+  }
+
+  // Stage 9: Search Index B-tree (Interior pages 0x02 and Leaf pages 0x0A)
+  static void searchIndexBtree(
+      RandomAccessFile databaseFile,
+      int pageSize,
+      int pageNumber,
+      String targetValue,
+      boolean noCase,
+      List<Long> matchedRowids) throws IOException {
+    long pageOffset = (long) (pageNumber - 1) * pageSize;
+    byte[] pageData = new byte[pageSize];
+    databaseFile.seek(pageOffset);
+    databaseFile.readFully(pageData);
+    ByteBuffer pageBuffer = ByteBuffer.wrap(pageData);
+
+    int btreeHeaderOffset = (pageNumber == 1) ? 100 : 0;
+    int pageType = pageBuffer.get(btreeHeaderOffset) & 0xFF;
+
+    if (pageType == 0x02) {
+      // Interior Index B-tree page:
+      // Offset 3..4: number of cells (2-byte unsigned short)
+      // Offset 8..11: rightmost child page number (4-byte unsigned int)
+      // Offset 12..: cell pointer array (2 bytes per cell)
+      int cellCount = Short.toUnsignedInt(pageBuffer.getShort(btreeHeaderOffset + 3));
+      int rightChildPage = pageBuffer.getInt(btreeHeaderOffset + 8);
+      int cellPointerArrayOffset = btreeHeaderOffset + 12;
+
+      String prevKey = null;
+      for (int i = 0; i < cellCount; i++) {
+        int cellOffset = Short.toUnsignedInt(pageBuffer.getShort(cellPointerArrayOffset + i * 2));
+        int leftChildPage = pageBuffer.getInt(cellOffset);
+        pageBuffer.position(cellOffset + 4);
+
+        readVarint(pageBuffer); // payload size
+        int headerStart = pageBuffer.position();
+        long headerSize = readVarint(pageBuffer);
+
+        List<Long> serialTypes = new ArrayList<>();
+        while (pageBuffer.position() - headerStart < headerSize) {
+          serialTypes.add(readVarint(pageBuffer));
+        }
+        pageBuffer.position(headerStart + (int) headerSize);
+
+        String cellKey = readIndexColumnValue(pageBuffer, serialTypes.get(0));
+        for (int c = 1; c < serialTypes.size() - 1; c++) {
+          skipColumnValue(pageBuffer, serialTypes.get(c));
+        }
+        long cellRowid = readInteger(pageBuffer, serialTypes.get(serialTypes.size() - 1));
+
+        int cmpWithTarget = compareValues(cellKey, targetValue, noCase);
+        int prevCmp = (prevKey == null) ? -1 : compareValues(prevKey, targetValue, noCase);
+
+        if (prevCmp <= 0 && cmpWithTarget >= 0) {
+          searchIndexBtree(databaseFile, pageSize, leftChildPage, targetValue, noCase, matchedRowids);
+        }
+
+        if (cmpWithTarget == 0) {
+          matchedRowids.add(cellRowid);
+        }
+
+        prevKey = cellKey;
+        if (cmpWithTarget > 0) {
+          return;
+        }
+      }
+
+      if (prevKey == null || compareValues(prevKey, targetValue, noCase) <= 0) {
+        searchIndexBtree(databaseFile, pageSize, rightChildPage, targetValue, noCase, matchedRowids);
+      }
+    } else if (pageType == 0x0A) {
+      // Leaf Index B-tree page:
+      // Offset 3..4: number of cells (2-byte unsigned short)
+      // Offset 8..: cell pointer array (2 bytes per cell)
+      int cellCount = Short.toUnsignedInt(pageBuffer.getShort(btreeHeaderOffset + 3));
+      int cellPointerArrayOffset = btreeHeaderOffset + 8;
+
+      for (int i = 0; i < cellCount; i++) {
+        int cellOffset = Short.toUnsignedInt(pageBuffer.getShort(cellPointerArrayOffset + i * 2));
+        pageBuffer.position(cellOffset);
+
+        readVarint(pageBuffer); // payload size
+        int headerStart = pageBuffer.position();
+        long headerSize = readVarint(pageBuffer);
+
+        List<Long> serialTypes = new ArrayList<>();
+        while (pageBuffer.position() - headerStart < headerSize) {
+          serialTypes.add(readVarint(pageBuffer));
+        }
+        pageBuffer.position(headerStart + (int) headerSize);
+
+        String cellKey = readIndexColumnValue(pageBuffer, serialTypes.get(0));
+        for (int c = 1; c < serialTypes.size() - 1; c++) {
+          skipColumnValue(pageBuffer, serialTypes.get(c));
+        }
+        long cellRowid = readInteger(pageBuffer, serialTypes.get(serialTypes.size() - 1));
+
+        int cmp = compareValues(cellKey, targetValue, noCase);
+        if (cmp == 0) {
+          matchedRowids.add(cellRowid);
+        } else if (cmp > 0) {
+          break;
+        }
+      }
+    }
+  }
+
+  // Point lookup: Find a table row by rowid using table B-tree (0x05 interior and 0x0D leaf)
+  static void findRowByRowid(RandomAccessFile databaseFile, int pageSize, int pageNumber, long targetRowid, ScanContext ctx) throws IOException {
+    long pageOffset = (long) (pageNumber - 1) * pageSize;
+    byte[] pageData = new byte[pageSize];
+    databaseFile.seek(pageOffset);
+    databaseFile.readFully(pageData);
+    ByteBuffer pageBuffer = ByteBuffer.wrap(pageData);
+
+    int btreeHeaderOffset = (pageNumber == 1) ? 100 : 0;
+    int pageType = pageBuffer.get(btreeHeaderOffset) & 0xFF;
+
+    if (pageType == 0x05) {
+      // Interior Table B-tree page:
+      int cellCount = Short.toUnsignedInt(pageBuffer.getShort(btreeHeaderOffset + 3));
+      int rightChildPage = pageBuffer.getInt(btreeHeaderOffset + 8);
+      int cellPointerArrayOffset = btreeHeaderOffset + 12;
+
+      int childPage = rightChildPage;
+      for (int i = 0; i < cellCount; i++) {
+        int cellOffset = Short.toUnsignedInt(pageBuffer.getShort(cellPointerArrayOffset + i * 2));
+        int leftChildPage = pageBuffer.getInt(cellOffset);
+        pageBuffer.position(cellOffset + 4);
+        long key = readVarint(pageBuffer);
+        if (targetRowid <= key) {
+          childPage = leftChildPage;
+          break;
+        }
+      }
+      findRowByRowid(databaseFile, pageSize, childPage, targetRowid, ctx);
+    } else if (pageType == 0x0D) {
+      // Leaf Table B-tree page:
+      int cellCount = Short.toUnsignedInt(pageBuffer.getShort(btreeHeaderOffset + 3));
+      int cellPointerArrayOffset = btreeHeaderOffset + 8;
+
+      for (int i = 0; i < cellCount; i++) {
+        int cellOffset = Short.toUnsignedInt(pageBuffer.getShort(cellPointerArrayOffset + i * 2));
+        pageBuffer.position(cellOffset);
+
+        readVarint(pageBuffer); // payload size
+        long rowid = readVarint(pageBuffer);
+
+        if (rowid == targetRowid) {
+          int headerStart = pageBuffer.position();
+          long headerSize = readVarint(pageBuffer);
+
+          List<Long> serialTypes = new ArrayList<>();
+          while (pageBuffer.position() - headerStart < headerSize) {
+            serialTypes.add(readVarint(pageBuffer));
+          }
+          pageBuffer.position(headerStart + (int) headerSize);
+
+          int totalCols = Math.max(ctx.columns.size(), serialTypes.size());
+          String[] recordValues = new String[totalCols];
+          for (int col = 0; col < serialTypes.size(); col++) {
+            long st = serialTypes.get(col);
+            boolean isPk = (col < ctx.columns.size()) && ctx.columns.get(col).isIntegerPrimaryKey;
+            recordValues[col] = readColumnValue(pageBuffer, st, isPk, rowid);
+          }
+          for (int col = serialTypes.size(); col < ctx.columns.size(); col++) {
+            if (ctx.columns.get(col).isIntegerPrimaryKey) {
+              recordValues[col] = String.valueOf(rowid);
+            }
+          }
+
+          if (ctx.query.isCount) {
+            ctx.matchCount++;
+            return;
+          }
+
+          List<String> rowValues = new ArrayList<>();
+          for (int colIdx : ctx.targetColIndices) {
+            String val = recordValues[colIdx];
+            rowValues.add(val != null ? val : "");
+          }
+
+          System.out.println(String.join("|", rowValues));
+          return;
+        } else if (rowid > targetRowid) {
+          break;
+        }
+      }
+    }
+  }
+
   // Stage 8: Traverse multi-page table B-tree (interior pages 0x05 and leaf pages 0x0D)
   static void traverseTableBtree(RandomAccessFile databaseFile, int pageSize, int pageNumber, ScanContext ctx) throws IOException {
     long pageOffset = (long) (pageNumber - 1) * pageSize;
@@ -150,27 +421,17 @@ public class Main {
     int pageType = pageBuffer.get(btreeHeaderOffset) & 0xFF;
 
     if (pageType == 0x05) {
-      // Interior Table B-tree page:
-      // Offset 3..4: number of cells (2-byte unsigned short)
-      // Offset 8..11: rightmost child page number (4-byte unsigned int)
-      // Offset 12..: cell pointer array (2 bytes per cell)
       int cellCount = Short.toUnsignedInt(pageBuffer.getShort(btreeHeaderOffset + 3));
       int rightChildPage = pageBuffer.getInt(btreeHeaderOffset + 8);
       int cellPointerArrayOffset = btreeHeaderOffset + 12;
 
       for (int i = 0; i < cellCount; i++) {
         int cellOffset = Short.toUnsignedInt(pageBuffer.getShort(cellPointerArrayOffset + i * 2));
-        // Interior cell structure:
-        // First 4 bytes: left child page number (4-byte unsigned big-endian integer)
-        // Following bytes: varint integer key (rowid)
         int leftChildPage = pageBuffer.getInt(cellOffset);
         traverseTableBtree(databaseFile, pageSize, leftChildPage, ctx);
       }
       traverseTableBtree(databaseFile, pageSize, rightChildPage, ctx);
     } else if (pageType == 0x0D) {
-      // Leaf Table B-tree page:
-      // Offset 3..4: number of cells (2-byte unsigned short)
-      // Offset 8..: cell pointer array (2 bytes per cell)
       int cellCount = Short.toUnsignedInt(pageBuffer.getShort(btreeHeaderOffset + 3));
       int cellPointerArrayOffset = btreeHeaderOffset + 8;
 
@@ -183,26 +444,18 @@ public class Main {
         int cellOffset = Short.toUnsignedInt(pageBuffer.getShort(cellPointerArrayOffset + i * 2));
         pageBuffer.position(cellOffset);
 
-        // Table leaf cell:
-        // 1. payload size (varint)
-        // 2. rowid (varint)
-        // 3. payload (record format)
         readVarint(pageBuffer);
         long rowid = readVarint(pageBuffer);
 
-        // Record format:
-        // 1. Header size (varint)
         int headerStart = pageBuffer.position();
         long headerSize = readVarint(pageBuffer);
 
-        // 2. Column serial types (varints)
         List<Long> serialTypes = new ArrayList<>();
         while (pageBuffer.position() - headerStart < headerSize) {
           serialTypes.add(readVarint(pageBuffer));
         }
         pageBuffer.position(headerStart + (int) headerSize);
 
-        // 3. Record body: decode all columns in this record
         int totalCols = Math.max(ctx.columns.size(), serialTypes.size());
         String[] recordValues = new String[totalCols];
         for (int col = 0; col < serialTypes.size(); col++) {
@@ -216,7 +469,6 @@ public class Main {
           }
         }
 
-        // Check WHERE condition
         if (ctx.whereColIndex != -1) {
           String rowVal = recordValues[ctx.whereColIndex];
           if (rowVal == null || !rowVal.equals(ctx.query.whereValue)) {
@@ -229,7 +481,6 @@ public class Main {
           continue;
         }
 
-        // Build row output according to requested columns order
         List<String> rowValues = new ArrayList<>();
         for (int colIdx : ctx.targetColIndices) {
           String val = recordValues[colIdx];
@@ -452,40 +703,24 @@ public class Main {
     ByteBuffer pageBuffer = ByteBuffer.wrap(page1);
 
     // Page 1 B-tree header starts at byte offset 100
-    // Offset 103..104: 2-byte number of cells on this page
     int cellCount = Short.toUnsignedInt(pageBuffer.getShort(103));
 
-    // Cell pointer array starts at byte offset 108
     List<SchemaRow> rows = new ArrayList<>();
     for (int i = 0; i < cellCount; i++) {
       int cellOffset = Short.toUnsignedInt(pageBuffer.getShort(108 + i * 2));
       pageBuffer.position(cellOffset);
 
-      // Table B-tree leaf cell format:
-      // 1. Payload size (varint)
-      // 2. Row ID (varint)
-      // 3. Payload (Record format)
       readVarint(pageBuffer);
       readVarint(pageBuffer);
 
-      // Record format:
-      // 1. Header size (varint, includes the varint itself)
       int headerStart = pageBuffer.position();
       long headerSize = readVarint(pageBuffer);
 
-      // 2. Serial type code for each column (varint)
       List<Long> serialTypes = new ArrayList<>();
       while (pageBuffer.position() - headerStart < headerSize) {
         serialTypes.add(readVarint(pageBuffer));
       }
 
-      // 3. Record body: values for each column
-      // Columns in sqlite_schema:
-      // 0: type (text)
-      // 1: name (text)
-      // 2: tbl_name (text)
-      // 3: rootpage (int)
-      // 4: sql (text)
       String type = null;
       String name = null;
       String tblName = null;
