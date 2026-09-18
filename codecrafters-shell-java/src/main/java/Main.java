@@ -17,7 +17,7 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 public class Main {
-    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "complete");
+    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "complete", "jobs");
     private static final Map<String, String> COMPLETION_SPECS = new HashMap<>();
     private static Path currentDir = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
 
@@ -194,6 +194,8 @@ public class Main {
                             String target = cmdArgs.get(3);
                             COMPLETION_SPECS.put(target, scriptPath);
                         }
+                    } else if (command.equals("jobs")) {
+                        // Empty implementation for stage 45 (#af3)
                     }
                 } finally {
                     if (closeOut) {
