@@ -35,14 +35,22 @@ public class Main {
       }
 
       String path = parts[1];
-      String response;
       if (path.equals("/")) {
-        response = "HTTP/1.1 200 OK\r\n\r\n";
+        String response = "HTTP/1.1 200 OK\r\n\r\n";
+        out.write(response.getBytes(StandardCharsets.UTF_8));
+      } else if (path.startsWith("/echo/")) {
+        String echoStr = path.substring(6);
+        byte[] bodyBytes = echoStr.getBytes(StandardCharsets.UTF_8);
+        String response = "HTTP/1.1 200 OK\r\n"
+            + "Content-Type: text/plain\r\n"
+            + "Content-Length: " + bodyBytes.length + "\r\n\r\n"
+            + echoStr;
+        out.write(response.getBytes(StandardCharsets.UTF_8));
       } else {
-        response = "HTTP/1.1 404 Not Found\r\n\r\n";
+        String response = "HTTP/1.1 404 Not Found\r\n\r\n";
+        out.write(response.getBytes(StandardCharsets.UTF_8));
       }
 
-      out.write(response.getBytes(StandardCharsets.UTF_8));
       out.flush();
     } catch (IOException e) {
       System.err.println("Client handling error: " + e.getMessage());
