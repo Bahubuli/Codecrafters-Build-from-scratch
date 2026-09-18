@@ -223,9 +223,14 @@ public class Main {
             int argLen = Integer.parseInt(lenLine.substring(1).trim());
             byte[] argBytes = in.readNBytes(argLen);
             parts[i] = new String(argBytes, StandardCharsets.UTF_8);
-            int cr = in.read();
-            int lf = in.read();
-            if (cr == -1 || lf == -1) {
+            int b1 = in.read();
+            if (b1 == '\r') {
+              int b2 = in.read();
+              if (b2 == -1) {
+                complete = false;
+                break;
+              }
+            } else if (b1 == -1) {
               complete = false;
               break;
             }
