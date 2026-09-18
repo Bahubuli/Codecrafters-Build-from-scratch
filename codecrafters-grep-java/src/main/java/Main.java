@@ -16,10 +16,17 @@ public class Main {
 
         String pattern = args[1];
         Scanner scanner = new Scanner(System.in);
-        String inputLine = scanner.nextLine();
+        boolean matchedAny = false;
 
-        if (matchPattern(inputLine, pattern)) {
-            System.out.println(inputLine);
+        while (scanner.hasNextLine()) {
+            String line = scanner.nextLine();
+            if (matchPattern(line, pattern)) {
+                System.out.println(line);
+                matchedAny = true;
+            }
+        }
+
+        if (matchedAny) {
             System.exit(0);
         } else {
             System.exit(1);
