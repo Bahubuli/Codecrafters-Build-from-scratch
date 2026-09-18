@@ -82,7 +82,8 @@ public class Main {
 
     enum Quantifier {
         EXACTLY_ONE,
-        ONE_OR_MORE
+        ONE_OR_MORE,
+        ZERO_OR_ONE
     }
 
     static class PatternElement {
@@ -97,7 +98,7 @@ public class Main {
 
     static List<PatternElement> parsePatternElements(String pattern) {
         List<Token> rawTokens = new ArrayList<>();
-        List<Boolean> hasPlus = new ArrayList<>();
+        List<Quantifier> quantifiers = new ArrayList<>();
 
         int i = 0;
         while (i < pattern.length()) {
@@ -144,22 +145,25 @@ public class Main {
                 i++;
             }
 
-            boolean plus = false;
-            if (i < pattern.length() && pattern.charAt(i) == '+') {
-                plus = true;
-                i++;
+            Quantifier q = Quantifier.EXACTLY_ONE;
+            if (i < pattern.length()) {
+                char nextChar = pattern.charAt(i);
+                if (nextChar == '+') {
+                    q = Quantifier.ONE_OR_MORE;
+                    i++;
+                } else if (nextChar == '?') {
+                    q = Quantifier.ZERO_OR_ONE;
+                    i++;
+                }
             }
 
             rawTokens.add(currentToken);
-            hasPlus.add(plus);
+            quantifiers.add(q);
         }
 
         List<PatternElement> elements = new ArrayList<>();
         for (int j = 0; j < rawTokens.size(); j++) {
-            elements.add(new PatternElement(
-                rawTokens.get(j),
-                hasPlus.get(j) ? Quantifier.ONE_OR_MORE : Quantifier.EXACTLY_ONE
-            ));
+            elements.add(new PatternElement(rawTokens.get(j), quantifiers.get(j)));
         }
         return elements;
     }
@@ -212,22 +216,28 @@ public class Main {
             }
             return false;
         } else if (current.quantifier == Quantifier.ONE_OR_MORE) {
-            // Must match at least one
             if (textIdx >= inputLine.length() || !current.token.matches(inputLine.charAt(textIdx))) {
                 return false;
             }
-            // Count how many consecutive characters can match
             int maxMatch = textIdx;
             while (maxMatch < inputLine.length() && current.token.matches(inputLine.charAt(maxMatch))) {
                 maxMatch++;
             }
-            // Greedy backtracking: try longest match down to 1 match
             for (int end = maxMatch; end >= textIdx + 1; end--) {
                 if (matchesAt(inputLine, end, elements, elemIdx + 1, anchorEnd)) {
                     return true;
                 }
             }
             return false;
+        } else if (current.quantifier == Quantifier.ZERO_OR_ONE) {
+            // Greedy: first attempt matching 1 character if possible
+            if (textIdx < inputLine.length() && current.token.matches(inputLine.charAt(textIdx))) {
+                if (matchesAt(inputLine, textIdx + 1, elements, elemIdx + 1, anchorEnd)) {
+                    return true;
+                }
+            }
+            // Backtrack / fall through: attempt matching 0 characters
+            return matchesAt(inputLine, textIdx, elements, elemIdx + 1, anchorEnd);
         }
         return false;
     }
