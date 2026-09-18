@@ -935,6 +935,29 @@ public class Main {
 
       out.write((":" + bit + "\r\n").getBytes(StandardCharsets.UTF_8));
       out.flush();
+    } else if (command.equalsIgnoreCase("STRLEN")) {
+      if (parts.length < 2) {
+        out.write("-ERR wrong number of arguments for 'strlen' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+      String rawKey = parts[1];
+      String key = stripQuotes(rawKey);
+      Entry entry = store.get(key);
+      if (entry == null && !key.equals(rawKey)) {
+        entry = store.get(rawKey);
+      }
+      if (entry != null && entry.isExpired()) {
+        store.remove(key);
+        if (!key.equals(rawKey)) {
+          store.remove(rawKey);
+        }
+        entry = null;
+      }
+
+      int len = (entry != null && entry.rawBytes != null) ? entry.rawBytes.length : 0;
+      out.write((":" + len + "\r\n").getBytes(StandardCharsets.UTF_8));
+      out.flush();
     } else if (command.equalsIgnoreCase("INCR")) {
       if (parts.length < 2) {
         out.write("-ERR wrong number of arguments for 'incr' command\r\n".getBytes(StandardCharsets.UTF_8));
