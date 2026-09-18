@@ -803,6 +803,10 @@ public class Main {
     } else if (command.equalsIgnoreCase("REPLCONF")) {
       // Stage 58: Replication handshake - master responds +OK to REPLCONF listening-port and REPLCONF capa
       out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
+    } else if (command.equalsIgnoreCase("PSYNC")) {
+      // Stage 59: Replication handshake - master responds +FULLRESYNC <masterReplId> 0\r\n
+      String response = "+FULLRESYNC " + masterReplId + " 0\r\n";
+      out.write(response.getBytes(StandardCharsets.UTF_8));
     } else if (command.equalsIgnoreCase("INFO")) {
       String info = getInfoReplication();
       byte[] bytes = info.getBytes(StandardCharsets.UTF_8);
