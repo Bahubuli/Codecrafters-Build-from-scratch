@@ -129,10 +129,21 @@ public class Main {
     }
 
     public static boolean matchPattern(String inputLine, String pattern) {
-        List<Token> tokens = parseTokens(pattern);
+        boolean anchorStart = false;
+        String activePattern = pattern;
+        if (pattern.startsWith("^")) {
+            anchorStart = true;
+            activePattern = pattern.substring(1);
+        }
+
+        List<Token> tokens = parseTokens(activePattern);
 
         if (tokens.isEmpty()) {
             return true;
+        }
+
+        if (anchorStart) {
+            return matchesAt(inputLine, 0, tokens, 0);
         }
 
         for (int start = 0; start <= inputLine.length(); start++) {
