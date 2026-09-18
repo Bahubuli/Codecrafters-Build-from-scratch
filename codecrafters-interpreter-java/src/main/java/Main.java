@@ -6,7 +6,7 @@ import java.util.List;
 public class Main {
     public static void main(String[] args) {
         if (args.length < 2) {
-            System.err.println("Usage: ./your_program.sh <command> <filename>");
+            System.err.println("Usage: ./your_program.sh tokenize <filename>");
             System.exit(1);
         }
 
@@ -48,6 +48,27 @@ public class Main {
             }
 
             System.out.println(new AstPrinter().print(expression));
+        } else if (command.equals("evaluate")) {
+            Scanner scanner = new Scanner(fileContents);
+            List<Token> tokens = scanner.scanTokens();
+
+            if (scanner.hasError()) {
+                System.exit(65);
+            }
+
+            Parser parser = new Parser(tokens);
+            Expr expression = parser.parse();
+
+            if (parser.hasError() || expression == null) {
+                System.exit(65);
+            }
+
+            Interpreter interpreter = new Interpreter();
+            interpreter.interpret(expression);
+
+            if (interpreter.hasRuntimeError()) {
+                System.exit(70);
+            }
         } else {
             System.err.println("Unknown command: " + command);
             System.exit(1);
