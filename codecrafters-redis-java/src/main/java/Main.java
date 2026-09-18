@@ -327,8 +327,17 @@ public class Main {
       out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
       propagate(parts);
     } else if (command.equalsIgnoreCase("GET")) {
-      String key = parts[1];
+      if (parts.length < 2) {
+        out.write("-ERR wrong number of arguments for 'get' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+      String rawKey = parts[1];
+      String key = stripQuotes(rawKey);
       Entry entry = store.get(key);
+      if (entry == null && !key.equals(rawKey)) {
+        entry = store.get(rawKey);
+      }
 
       if (entry != null && !entry.isExpired()) {
         byte[] bytes = entry.value.getBytes(StandardCharsets.UTF_8);
@@ -337,6 +346,9 @@ public class Main {
       } else {
         if (entry != null && entry.isExpired()) {
           store.remove(key);
+          if (!key.equals(rawKey)) {
+            store.remove(rawKey);
+          }
         }
         out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
       }
@@ -1324,7 +1336,7 @@ public class Main {
       }
     }
 
-    // Stage 71: Load RDB file at startup
+    // Stage 72: Load RDB file at startup
     loadRdb();
 
     try {
