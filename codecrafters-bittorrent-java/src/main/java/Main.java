@@ -298,7 +298,8 @@ public class Main {
           }
 
           boolean peerSupportsExtensions = (response[25] & 0x10) != 0;
-          readMessage(in); // Bitfield
+          // First message might be bitfield (id=5) or extension handshake directly (id=20)
+          PeerMessage firstMsg = readMessage(in);
 
           if (peerSupportsExtensions) {
             byte[] bencodedDict = "d1:md11:ut_metadatai16eee".getBytes(StandardCharsets.UTF_8);
@@ -312,7 +313,7 @@ public class Main {
             out.write(extMsg.array());
             out.flush();
 
-            PeerMessage extResp = readMessage(in);
+            PeerMessage extResp = (firstMsg.id == 20) ? firstMsg : readMessage(in);
             if (extResp.id == 20 && extResp.payload.length > 1 && extResp.payload[0] == 0) {
               byte[] dictBytes = Arrays.copyOfRange(extResp.payload, 1, extResp.payload.length);
               ByteBencodeParser extParser = new ByteBencodeParser(dictBytes);
