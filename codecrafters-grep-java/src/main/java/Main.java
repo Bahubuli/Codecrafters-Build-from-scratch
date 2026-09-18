@@ -251,11 +251,31 @@ public class Main {
         }
     }
 
-    enum Quantifier {
-        EXACTLY_ONE,
-        ONE_OR_MORE,
-        ZERO_OR_ONE,
-        ZERO_OR_MORE
+    static class Quantifier {
+        final int min;
+        final int max;
+
+        Quantifier(int min, int max) {
+            this.min = min;
+            this.max = max;
+        }
+
+        static final Quantifier EXACTLY_ONE = new Quantifier(1, 1);
+        static final Quantifier ZERO_OR_ONE = new Quantifier(0, 1);
+        static final Quantifier ONE_OR_MORE = new Quantifier(1, Integer.MAX_VALUE);
+        static final Quantifier ZERO_OR_MORE = new Quantifier(0, Integer.MAX_VALUE);
+
+        static Quantifier exact(int n) {
+            return new Quantifier(n, n);
+        }
+
+        static Quantifier range(int min, int max) {
+            return new Quantifier(min, max);
+        }
+
+        static Quantifier atLeast(int min) {
+            return new Quantifier(min, Integer.MAX_VALUE);
+        }
     }
 
     interface PatternNode {}
@@ -397,6 +417,31 @@ public class Main {
                 } else if (next == '*') {
                     pos++;
                     return Quantifier.ZERO_OR_MORE;
+                } else if (next == '{') {
+                    int closeIdx = pattern.indexOf('}', pos);
+                    if (closeIdx != -1) {
+                        String content = pattern.substring(pos + 1, closeIdx);
+                        if (content.contains(",")) {
+                            String[] parts = content.split(",", -1);
+                            try {
+                                int min = Integer.parseInt(parts[0].trim());
+                                if (parts.length > 1 && !parts[1].trim().isEmpty()) {
+                                    int max = Integer.parseInt(parts[1].trim());
+                                    pos = closeIdx + 1;
+                                    return Quantifier.range(min, max);
+                                } else {
+                                    pos = closeIdx + 1;
+                                    return Quantifier.atLeast(min);
+                                }
+                            } catch (NumberFormatException ignored) {}
+                        } else {
+                            try {
+                                int n = Integer.parseInt(content.trim());
+                                pos = closeIdx + 1;
+                                return Quantifier.exact(n);
+                            } catch (NumberFormatException ignored) {}
+                        }
+                    }
                 }
             }
             return Quantifier.EXACTLY_ONE;
@@ -501,47 +546,21 @@ public class Main {
 
         if (current instanceof TokenNode) {
             TokenNode tn = (TokenNode) current;
-            if (tn.quantifier == Quantifier.EXACTLY_ONE) {
-                if (textIdx < inputLine.length() && tn.token.matches(inputLine.charAt(textIdx))) {
-                    return matchEndNodesAt(inputLine, textIdx + 1, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
-                }
-                return -1;
-            } else if (tn.quantifier == Quantifier.ONE_OR_MORE) {
-                if (textIdx >= inputLine.length() || !tn.token.matches(inputLine.charAt(textIdx))) {
-                    return -1;
-                }
-                int maxMatch = textIdx;
-                while (maxMatch < inputLine.length() && tn.token.matches(inputLine.charAt(maxMatch))) {
-                    maxMatch++;
-                }
-                for (int end = maxMatch; end >= textIdx + 1; end--) {
-                    int res = matchEndNodesAt(inputLine, end, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
-                    if (res != -1) {
-                        return res;
-                    }
-                }
-                return -1;
-            } else if (tn.quantifier == Quantifier.ZERO_OR_ONE) {
-                if (textIdx < inputLine.length() && tn.token.matches(inputLine.charAt(textIdx))) {
-                    int res = matchEndNodesAt(inputLine, textIdx + 1, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
-                    if (res != -1) {
-                        return res;
-                    }
-                }
-                return matchEndNodesAt(inputLine, textIdx, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
-            } else if (tn.quantifier == Quantifier.ZERO_OR_MORE) {
-                int maxMatch = textIdx;
-                while (maxMatch < inputLine.length() && tn.token.matches(inputLine.charAt(maxMatch))) {
-                    maxMatch++;
-                }
-                for (int end = maxMatch; end >= textIdx; end--) {
-                    int res = matchEndNodesAt(inputLine, end, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
-                    if (res != -1) {
-                        return res;
-                    }
-                }
+            Quantifier q = tn.quantifier;
+            int count = 0;
+            while (textIdx + count < inputLine.length() && count < q.max && tn.token.matches(inputLine.charAt(textIdx + count))) {
+                count++;
+            }
+            if (count < q.min) {
                 return -1;
             }
+            for (int len = count; len >= q.min; len--) {
+                int res = matchEndNodesAt(inputLine, textIdx + len, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+                if (res != -1) {
+                    return res;
+                }
+            }
+            return -1;
         } else if (current instanceof GroupNode) {
             GroupNode gn = (GroupNode) current;
             for (List<PatternNode> branch : gn.branches) {
@@ -556,7 +575,7 @@ public class Main {
                     }
                 }
             }
-            if (gn.quantifier == Quantifier.ZERO_OR_ONE || gn.quantifier == Quantifier.ZERO_OR_MORE) {
+            if (gn.quantifier.min == 0) {
                 return matchEndNodesAt(inputLine, textIdx, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
             }
             return -1;
@@ -590,34 +609,29 @@ public class Main {
         PatternNode current = branchNodes.get(bIdx);
         if (current instanceof TokenNode) {
             TokenNode tn = (TokenNode) current;
-            if (tn.quantifier == Quantifier.EXACTLY_ONE) {
-                if (textIdx < inputLine.length() && tn.token.matches(inputLine.charAt(textIdx))) {
-                    findBranchMatches(inputLine, textIdx + 1, branchNodes, bIdx + 1, capturedGroups, endPositions);
+            Quantifier q = tn.quantifier;
+            int count = 0;
+            while (textIdx + count < inputLine.length() && count < q.max && tn.token.matches(inputLine.charAt(textIdx + count))) {
+                count++;
+            }
+            if (count >= q.min) {
+                for (int len = count; len >= q.min; len--) {
+                    findBranchMatches(inputLine, textIdx + len, branchNodes, bIdx + 1, capturedGroups, endPositions);
                 }
-            } else if (tn.quantifier == Quantifier.ONE_OR_MORE) {
-                if (textIdx >= inputLine.length() || !tn.token.matches(inputLine.charAt(textIdx))) {
-                    return;
+            }
+        } else if (current instanceof GroupNode) {
+            GroupNode gn = (GroupNode) current;
+            for (List<PatternNode> branch : gn.branches) {
+                List<Integer> branchEnds = new ArrayList<>();
+                findBranchMatches(inputLine, textIdx, branch, 0, capturedGroups, branchEnds);
+                for (int endPos : branchEnds) {
+                    Map<Integer, String> newCaptured = new HashMap<>(capturedGroups);
+                    newCaptured.put(gn.groupId, inputLine.substring(textIdx, endPos));
+                    findBranchMatches(inputLine, endPos, branchNodes, bIdx + 1, newCaptured, endPositions);
                 }
-                int maxMatch = textIdx;
-                while (maxMatch < inputLine.length() && tn.token.matches(inputLine.charAt(maxMatch))) {
-                    maxMatch++;
-                }
-                for (int end = maxMatch; end >= textIdx + 1; end--) {
-                    findBranchMatches(inputLine, end, branchNodes, bIdx + 1, capturedGroups, endPositions);
-                }
-            } else if (tn.quantifier == Quantifier.ZERO_OR_ONE) {
-                if (textIdx < inputLine.length() && tn.token.matches(inputLine.charAt(textIdx))) {
-                    findBranchMatches(inputLine, textIdx + 1, branchNodes, bIdx + 1, capturedGroups, endPositions);
-                }
+            }
+            if (gn.quantifier.min == 0) {
                 findBranchMatches(inputLine, textIdx, branchNodes, bIdx + 1, capturedGroups, endPositions);
-            } else if (tn.quantifier == Quantifier.ZERO_OR_MORE) {
-                int maxMatch = textIdx;
-                while (maxMatch < inputLine.length() && tn.token.matches(inputLine.charAt(maxMatch))) {
-                    maxMatch++;
-                }
-                for (int end = maxMatch; end >= textIdx; end--) {
-                    findBranchMatches(inputLine, end, branchNodes, bIdx + 1, capturedGroups, endPositions);
-                }
             }
         } else if (current instanceof BackreferenceNode) {
             BackreferenceNode bn = (BackreferenceNode) current;
