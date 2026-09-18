@@ -260,6 +260,19 @@ public class Main {
     return new double[] { lon, lat };
   }
 
+  private static final double EARTH_RADIUS_IN_METERS = 6372797.560856;
+
+  private static double geohashGetDistance(double lon1d, double lat1d, double lon2d, double lat2d) {
+    double lat1r = Math.toRadians(lat1d);
+    double lon1r = Math.toRadians(lon1d);
+    double lat2r = Math.toRadians(lat2d);
+    double lon2r = Math.toRadians(lon2d);
+    double u = Math.sin((lat2r - lat1r) / 2.0);
+    double v = Math.sin((lon2r - lon1r) / 2.0);
+    return 2.0 * EARTH_RADIUS_IN_METERS *
+           Math.asin(Math.sqrt(u * u + Math.cos(lat1r) * Math.cos(lat2r) * v * v));
+  }
+
   private static final Map<String, List<String>> listStore = new ConcurrentHashMap<>();
   private static final Map<String, List<StreamEntry>> streamStore = new ConcurrentHashMap<>();
   private static final Map<String, SortedSet> zsetStore = new ConcurrentHashMap<>();
@@ -921,6 +934,53 @@ public class Main {
         }
         out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
         out.flush();
+      }
+    } else if (command.equalsIgnoreCase("GEODIST")) {
+      if (parts.length < 4) {
+        out.write("-ERR wrong number of arguments for 'geodist' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      } else {
+        String key = parts[1];
+        String member1 = parts[2];
+        String member2 = parts[3];
+        double multiplier = 1.0;
+        boolean validUnit = true;
+        if (parts.length >= 5) {
+          String unit = parts[4].toLowerCase();
+          if (unit.equals("m")) {
+            multiplier = 1.0;
+          } else if (unit.equals("km")) {
+            multiplier = 1000.0;
+          } else if (unit.equals("mi")) {
+            multiplier = 1609.34;
+          } else if (unit.equals("ft")) {
+            multiplier = 0.3048;
+          } else {
+            validUnit = false;
+            out.write("-ERR unsupported unit provided. please use m, km, ft, mi\r\n".getBytes(StandardCharsets.UTF_8));
+            out.flush();
+          }
+        }
+        if (validUnit) {
+          SortedSet zset = zsetStore.get(key);
+          if (zset == null) {
+            out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
+          } else {
+            Double s1 = zset.getScore(member1);
+            Double s2 = zset.getScore(member2);
+            if (s1 == null || s2 == null) {
+              out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
+            } else {
+              double[] c1 = decodeGeo((long) s1.doubleValue());
+              double[] c2 = decodeGeo((long) s2.doubleValue());
+              double dist = geohashGetDistance(c1[0], c1[1], c2[0], c2[1]) / multiplier;
+              String res = String.format(java.util.Locale.ROOT, "%.4f", dist);
+              byte[] bytes = res.getBytes(StandardCharsets.UTF_8);
+              out.write(("$" + bytes.length + "\r\n" + res + "\r\n").getBytes(StandardCharsets.UTF_8));
+            }
+          }
+          out.flush();
+        }
       }
     } else if (command.equalsIgnoreCase("ZRANGE")) {
       if (parts.length < 4) {
