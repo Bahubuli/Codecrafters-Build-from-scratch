@@ -111,6 +111,9 @@ public class Main {
   private static final Map<String, Object> keyLocks = new ConcurrentHashMap<>();
   private static final Map<String, Set<ClientContext>> keyWatchers = new ConcurrentHashMap<>();
   private static final Map<String, Set<ClientContext>> channelSubscribers = new ConcurrentHashMap<>();
+  private static final Set<String> ALLOWED_SUBSCRIBED_COMMANDS = Set.of(
+      "SUBSCRIBE", "UNSUBSCRIBE", "PSUBSCRIBE", "PUNSUBSCRIBE", "SSUBSCRIBE", "SUNSUBSCRIBE", "PING", "QUIT", "RESET"
+  );
   private static final Object streamNotifier = new Object();
   private static final Object txExecutionLock = new Object();
   private static int port = 6379;
@@ -1816,6 +1819,22 @@ public class Main {
               }
 
               String command = parts[0];
+
+              if (command.equalsIgnoreCase("QUIT")) {
+                out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                break;
+              }
+
+              if (!clientCtx.subscribedChannels.isEmpty()) {
+                String upper = command.toUpperCase();
+                if (!ALLOWED_SUBSCRIBED_COMMANDS.contains(upper)) {
+                  String err = "-ERR Can't execute '" + command.toLowerCase() + "': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context\r\n";
+                  out.write(err.getBytes(StandardCharsets.UTF_8));
+                  out.flush();
+                  continue;
+                }
+              }
 
               if (inTx[0]) {
                 if (command.equalsIgnoreCase("EXEC")) {
