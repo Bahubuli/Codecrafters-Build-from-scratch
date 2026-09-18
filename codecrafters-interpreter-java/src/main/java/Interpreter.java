@@ -4,6 +4,10 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     private Environment environment = new Environment();
     private boolean hasRuntimeError = false;
 
+    public boolean hasRuntimeError() {
+        return hasRuntimeError;
+    }
+
     public void interpret(List<Stmt> statements) {
         try {
             for (Stmt statement : statements) {
@@ -23,10 +27,6 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
             System.err.println(error.getMessage() + "\n[line " + error.token.line + "]");
             hasRuntimeError = true;
         }
-    }
-
-    public boolean hasRuntimeError() {
-        return hasRuntimeError;
     }
 
     private void execute(Stmt stmt) {
@@ -59,6 +59,13 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
         environment.define(stmt.name.lexeme, value);
         return null;
+    }
+
+    @Override
+    public Object visitAssignExpr(Expr.Assign expr) {
+        Object value = evaluate(expr.value);
+        environment.assign(expr.name, value);
+        return value;
     }
 
     @Override
