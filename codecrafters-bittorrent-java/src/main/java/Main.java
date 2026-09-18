@@ -4,6 +4,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -39,6 +40,13 @@ public class Main {
       this.id = id;
       this.payload = payload;
     }
+  }
+
+  static class MagnetLink {
+    String infoHash;
+    String trackerUrl;
+    String exactTopic;
+    String displayName;
   }
 
   public static void main(String[] args) throws Exception {
@@ -250,9 +258,42 @@ public class Main {
       }
       Files.write(outPath, fullFile);
       System.out.println("Downloaded " + torrentFilePath + " to " + outputPath + ".");
+    } else if ("magnet_parse".equals(command)) {
+      String magnetLink = args[1];
+      MagnetLink parsed = parseMagnetLink(magnetLink);
+      System.out.println("Tracker URL: " + parsed.trackerUrl);
+      System.out.println("Info Hash: " + parsed.infoHash);
     } else {
       System.out.println("Unknown command: " + command);
     }
+  }
+
+  static MagnetLink parseMagnetLink(String uri) {
+    MagnetLink magnet = new MagnetLink();
+    int qIndex = uri.indexOf('?');
+    if (qIndex == -1) {
+      return magnet;
+    }
+    String queryString = uri.substring(qIndex + 1);
+    String[] params = queryString.split("&");
+    for (String param : params) {
+      int eqIndex = param.indexOf('=');
+      if (eqIndex == -1) continue;
+      String key = param.substring(0, eqIndex);
+      String rawVal = param.substring(eqIndex + 1);
+      String val = URLDecoder.decode(rawVal, StandardCharsets.UTF_8);
+      if ("xt".equals(key)) {
+        magnet.exactTopic = val;
+        if (val.startsWith("urn:btih:")) {
+          magnet.infoHash = val.substring("urn:btih:".length()).toLowerCase();
+        }
+      } else if ("tr".equals(key)) {
+        magnet.trackerUrl = val;
+      } else if ("dn".equals(key)) {
+        magnet.displayName = val;
+      }
+    }
+    return magnet;
   }
 
   static byte[] generatePeerId() {
