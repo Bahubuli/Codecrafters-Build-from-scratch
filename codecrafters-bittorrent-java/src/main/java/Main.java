@@ -337,6 +337,9 @@ public class Main {
                 out.flush();
 
                 connected = true;
+                try {
+                  Thread.sleep(1000);
+                } catch (InterruptedException ignored) {}
                 break;
               }
             }
