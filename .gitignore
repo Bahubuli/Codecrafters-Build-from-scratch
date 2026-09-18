@@ -1,3 +1,5 @@
 target/
 .shell-repo/
 .http-repo/
+.dns-repo/
+.*-repo/
