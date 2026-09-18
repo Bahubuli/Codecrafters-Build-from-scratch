@@ -98,24 +98,46 @@ The Self-test goes first on purpose: a card I answer is worth ten I re-read. The
 
 ## Autonomous Archival & Subagent Execution Pipeline
 
-When operating in full autonomous mode to archive solutions before subscription expiration:
+When operating in autonomous mode to archive solutions for study:
 
-1. **Active Task Inspection**:
-   - Run `& "C:\Users\jiten\AppData\Local\Programs\codecrafters\codecrafters.exe" task` to fetch the current stage requirements.
+1. **Check Active Stage**:
+   ```powershell
+   & "C:\Users\jiten\AppData\Local\Programs\codecrafters\codecrafters.exe" task
+   ```
 2. **Implementation & Verification**:
-   - Write clean, production-grade, modular Java code in `src/main/java/Main.java` (and helper classes as needed).
-   - Verify local compilation with `javac -d target/classes src/main/java/Main.java`.
+   - Write clean, production-grade Java code in `codecrafters-redis-java/src/main/java/Main.java`.
+   - Test compilation locally:
+     ```powershell
+     javac -d target/classes codecrafters-redis-java/src/main/java/Main.java
+     ```
 3. **Documentation Generation**:
-   - Write `Tasks/NN. <Stage Name>.md` strictly complying with the pedagogical format in this document. Include Problem Solved, Concepts, What Breaks It (failure modes), Tradeoffs, Wire Format, Java Specifics, and Rebuild Checklist.
+   - Create `codecrafters-redis-java/Tasks/NN. <Stage Title>.md` strictly following the pedagogical format (Problem Solved, Concepts, Wire Format, Failure Modes, Tradeoffs, Java Specifics, and Rebuild Checklist).
 4. **Monorepo Git Commit & Push**:
-   - Commit changes to the monorepo git branch:
-     `git add . ; git commit -m "Solve Stage NN: <Stage Name>" ; git push origin master`
+   ```powershell
+   git add .
+   git commit -m "Solve Stage NN: <Stage Title>"
+   git push origin master
+   ```
 5. **CodeCrafters Remote Submission**:
-   - Submit directly to CodeCrafters remote using PowerShell script:
-     `powershell -File scripts\push-redis.ps1 "Stage NN: <Stage Name>"`
-   - Ensure all remote tests pass.
-6. **Automated Stage Advance**:
-   - Run the browser automation script `scratch/mark_stage_complete.py` via Playwright Firefox session state to click "Mark stage as complete" on `https://app.codecrafters.io/courses/redis/overview`.
-   - Verify next stage is unlocked with `codecrafters.exe task`.
-7. **Subagent Delegation**:
-   - For consecutive stages, spawn a subagent with a concise prompt containing the stage requirements, pointing to `Agent.md` and `scripts/push-redis.ps1` to prevent parent context bloat.
+   ```powershell
+   powershell -File scripts\push-redis.ps1 "Stage NN: <Stage Title>"
+   ```
+   Confirm all remote tests pass (`[tester::#XXX] Test passed.`).
+6. **Advance Stage in Web UI**:
+   - Run the automated browser script (uses saved session or extracts Firefox profile cookies):
+     ```powershell
+     python scripts\mark_stage_complete.py
+     ```
+   - Verify the next stage is active via `codecrafters.exe task`.
+7. **Subagent Delegation Loop**:
+   - Spin up subagents (`invoke_subagent` with type `self`) stage-by-stage to prevent parent context bloat.
+   - Subagent prompt template:
+     > "You are an autonomous engineering agent solving the next Redis challenge stage.
+     > 1. Run `& 'C:\Users\jiten\AppData\Local\Programs\codecrafters\codecrafters.exe' task` to read the active requirements.
+     > 2. Implement the solution in `codecrafters-redis-java/src/main/java/Main.java`.
+     > 3. Verify compilation with `javac -d target/classes codecrafters-redis-java/src/main/java/Main.java`.
+     > 4. Create `codecrafters-redis-java/Tasks/NN. <Title>.md` adhering strictly to `Agent.md`.
+     > 5. Commit and push to monorepo: `git add . ; git commit -m 'Solve Stage NN: <Title>' ; git push origin master`.
+     > 6. Submit to CodeCrafters: `powershell -File scripts\push-redis.ps1 'Stage NN: <Title>'`.
+     > 7. Advance the stage: `python scripts\mark_stage_complete.py`.
+     > 8. Verify the new task with `codecrafters.exe task` and report results."
