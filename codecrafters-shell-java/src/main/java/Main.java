@@ -221,6 +221,7 @@ public class Main {
                 }
             }
         }
+        saveHistoryOnExit();
     }
 
     private static void executePipeline(List<List<String>> pipeCommands) {
@@ -524,6 +525,7 @@ public class Main {
                 }
             }
             if (!inSubshell) {
+                saveHistoryOnExit();
                 if (out != System.out) {
                     out.close();
                 }
@@ -742,6 +744,26 @@ public class Main {
         return pc;
     }
 
+
+    private static void saveHistoryOnExit() {
+        String histFile = System.getenv("HISTFILE");
+        if (histFile != null && !histFile.isEmpty()) {
+            try {
+                Path p = currentDir.resolve(histFile).normalize();
+                if (p.getParent() != null) {
+                    Files.createDirectories(p.getParent());
+                }
+                StringBuilder sb = new StringBuilder();
+                synchronized (commandHistory) {
+                    for (String hCmd : commandHistory) {
+                        sb.append(hCmd).append("\n");
+                    }
+                }
+                Files.writeString(p, sb.toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            } catch (IOException ignored) {}
+        }
+    }
+
     private static void setRawMode(boolean raw) {
         try {
             String cmd = raw ? "stty -icanon -echo </dev/tty" : "stty sane </dev/tty";
@@ -752,6 +774,7 @@ public class Main {
     private static void enableRawMode() {
         setRawMode(true);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            saveHistoryOnExit();
             setRawMode(false);
         }));
     }
