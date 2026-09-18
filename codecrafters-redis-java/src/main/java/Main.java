@@ -785,6 +785,8 @@ public class Main {
           out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
         }
       }
+    } else if (command.equalsIgnoreCase("UNWATCH")) {
+      out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
     }
   }
 
