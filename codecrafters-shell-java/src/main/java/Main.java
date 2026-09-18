@@ -224,18 +224,28 @@ public class Main {
                 return line.toString();
             } else if (ch == '\t') {
                 String current = line.toString();
-                Set<String> matches = getCompletions(current);
+                int lastSpace = current.lastIndexOf(' ');
+                String word;
+                Set<String> matches;
+                if (lastSpace == -1) {
+                    word = current;
+                    matches = getCommandCompletions(word);
+                } else {
+                    word = current.substring(lastSpace + 1);
+                    matches = getFileCompletions(word);
+                }
+
                 if (matches.size() == 1) {
                     String match = matches.iterator().next();
-                    String completion = match.substring(current.length()) + " ";
+                    String completion = match.substring(word.length()) + " ";
                     line.append(completion);
                     System.out.print(completion);
                     System.out.flush();
                     consecutiveTabs = 0;
                 } else if (matches.size() > 1) {
                     String lcp = longestCommonPrefix(matches);
-                    if (lcp.length() > current.length()) {
-                        String completion = lcp.substring(current.length());
+                    if (lcp.length() > word.length()) {
+                        String completion = lcp.substring(word.length());
                         line.append(completion);
                         System.out.print(completion);
                         System.out.flush();
@@ -277,7 +287,28 @@ public class Main {
         }
     }
 
-    private static Set<String> getCompletions(String prefix) {
+    private static Set<String> getFileCompletions(String prefix) {
+        Set<String> candidates = new TreeSet<>();
+        File[] files = currentDir.toFile().listFiles();
+        if (files != null) {
+            for (File file : files) {
+                try {
+                    if (file.isFile()) {
+                        String name = file.getName();
+                        if (!prefix.startsWith(".") && name.startsWith(".")) {
+                            continue;
+                        }
+                        if (name.startsWith(prefix)) {
+                            candidates.add(name);
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+        return candidates;
+    }
+
+    private static Set<String> getCommandCompletions(String prefix) {
         Set<String> candidates = new TreeSet<>();
         for (String builtin : List.of("echo", "exit")) {
             if (builtin.startsWith(prefix)) {
