@@ -1,52 +1,75 @@
 # CodeCrafters Build Your Own X
 
-Parent workspace for learning systems projects from scratch.
+Parent workspace for building and mastering systems software from scratch.
 
-This repository is the main learning repo. Each challenge lives in its own
-folder so the code is visible directly on GitHub.
+This monorepo tracks deep-dive implementations of real-world infrastructure systems. Each project is implemented with production-grade architecture, exhaustive failure-mode testing, and comprehensive pedagogical documentation.
 
 ## Projects
 
-| Project | Local path | CodeCrafters challenge |
-| --- | --- | --- |
-| Build Your Own Redis | `codecrafters-redis-java` | Redis, Java |
-| Build Your Own Shell | `codecrafters-shell-java` | Shell, Java |
+| Project | Local Path | Language | Status | CodeCrafters Challenge |
+| :--- | :--- | :--- | :--- | :--- |
+| **Build Your Own Redis** | [`codecrafters-redis-java`](codecrafters-redis-java/) | Java 21 | **100% Completed** (123/123 Stages) | [Redis Challenge](https://app.codecrafters.io/courses/redis/overview) |
+| **Build Your Own HTTP Server** | [`codecrafters-http-server-java`](codecrafters-http-server-java/) | Java 21 | **In Progress** | [HTTP Server Challenge](https://app.codecrafters.io/courses/http-server/overview) |
+| **Build Your Own Shell** | [`codecrafters-shell-java`](codecrafters-shell-java/) | Java 21 | Available | [Shell Challenge](https://app.codecrafters.io/courses/shell/overview) |
 
-## Repository Model
+---
 
-- The parent repo is pushed to GitHub:
+### 1. Build Your Own Redis (`codecrafters-redis-java`)
+Full-featured, protocol-compliant in-memory key-value store and streaming engine:
+- **Core RESP Wire Protocol & Storage Engine**: PING, ECHO, SET (with PX/EX TTL expiry), GET, INCR, TYPE, KEYS, CONFIG GET.
+- **Lists**: RPUSH, LPUSH, LPOP, LRANGE (positive & negative indexing), LLEN, BLPOP (blocking pop with zero and fractional timeouts).
+- **Streams**: XADD (fully/partially auto-generated & explicit IDs, validation), XRANGE (bounded, `-`, `+`), XREAD (single/multi-stream, blocking with timeouts and `$` latest-id tracking).
+- **Transactions & Optimistic Locking**: MULTI, EXEC, DISCARD, WATCH (tracking modifications, missing keys, multi-key watches, UNWATCH, auto-unwatch on EXEC/DISCARD).
+- **Replication Engine**: Full duplex master-replica handshakes (PING, REPLCONF listening-port, REPLCONF capa, PSYNC ? -1), empty RDB snapshot transfer, real-time command propagation, REPLCONF ACK offset synchronization, WAIT command barrier.
+- **Persistence (RDB & AOF)**: Binary RDB parsing (string encoding, timestamps, length-prefixed bytes, expired key filtration), AOF directory & manifest management, write filtering, crash recovery replaying.
+- **Pub/Sub Messaging**: SUBSCRIBE, UNSUBSCRIBE, PUBLISH, state isolation (connection subscribed mode enforcement).
+- **Sorted Sets (ZSET)**: ZADD, ZRANK, ZRANGE, ZCOUNT, ZSCORE, ZREM (composite sorted order, float scores).
+- **Geospatial Indexes (GEO)**: GEOADD, GEOPOS, GEODIST, GEOSEARCH (Haversine formula, 52-bit integer geohash encoding/decoding, search by radius).
+- **Security & Access Control (ACL)**: ACL WHOAMI, ACL GETUSER, `nopass` flag, SHA-256 hashed password authentication, AUTH command, connection authentication enforcement.
+- **Bitmaps**: SETBIT, GETBIT, BITCOUNT, BITOP (AND, OR, XOR, NOT) with zero-padding and bitwise alignment.
+- **Pedagogical Archive**: All 123 stages accompanied by deep architectural documentation in [`codecrafters-redis-java/Tasks/`](codecrafters-redis-java/Tasks/).
+
+---
+
+### 2. Build Your Own HTTP Server (`codecrafters-http-server-java`)
+Lightweight, RFC-compliant HTTP/1.1 web server built from TCP primitives:
+- TCP server socket binding and concurrent connection handling via thread pools.
+- HTTP request line, header, and body parsing.
+- URL routing, dynamic path parameter extraction, and status code generation (`200 OK`, `404 Not Found`, `201 Created`).
+- File serving and uploading (`/files/{filename}`).
+- Content negotiation and HTTP compression (`gzip` via `java.util.zip.GZIPOutputStream`).
+- Persistent connections (`Connection: keep-alive`).
+
+---
+
+### 3. Build Your Own Shell (`codecrafters-shell-java`)
+POSIX-compliant command-line interpreter:
+- Built-in commands (`echo`, `type`, `exit`, `pwd`, `cd`).
+- `PATH` resolution and external program execution.
+- Single and double quoting rules, escaping, argument tokenization.
+- Standard input/output/error redirection (`>`, `1>`, `2>`, `>>`, `1>>`, `2>>`).
+- Pipelines (`|`) with multi-process coordination.
+
+---
+
+## Repository Architecture & Remotes
+
+- **Parent Monorepo**: Pushed to GitHub:
   `https://github.com/Bahubuli/Codecrafters-Build-from-scratch.git`
-- Each challenge (`codecrafters-redis-java`, `codecrafters-shell-java`) is a normal folder tracked by the parent repo.
-- The parent repo has extra remotes:
-  - `redis-codecrafters` pointing to the CodeCrafters Redis repository.
-  - `shell-codecrafters` pointing to the CodeCrafters Shell repository.
-- You do not need a separate local branch for CodeCrafters. Keep one branch,
-  `master`, and submit challenge folders to CodeCrafters with the helper scripts.
+- **CodeCrafters Remotes**:
+  - `redis-codecrafters`: `https://git.codecrafters.io/9300847fe0a03ad5`
+  - `http-codecrafters`: `https://git.codecrafters.io/a660f48206a74329`
+  - `shell-codecrafters`: `https://git.codecrafters.io/d44f4c8a35fb46bd`
+
+CodeCrafters isolates tests per challenge repo. Submissions are synced seamlessly from the monorepo to the respective challenge remotes via dedicated scripts:
 
 ```sh
-git remote -v
-```
+# Submit Redis changes
+powershell -File scripts/push-redis.ps1 "Stage NN: <Title>"
 
-CodeCrafters creates a Git repository per challenge and runs tests when code is
-submitted. In this repo, GitHub receives the whole learning workspace, while
-CodeCrafters receives only the challenge folder.
+# Submit HTTP Server changes
+powershell -File scripts/push-http.ps1 "Stage NN: <Title>"
 
-## Daily Workflow
-
-Work inside the challenge folder:
-
-```sh
-cd codecrafters-shell-java
-# edit code
-cd ..
-git status
-git add .
-git commit -m "Solve Stage NN: <Title>"
-git push origin master
-```
-
-Then submit the challenge folder to CodeCrafters:
-
-```sh
-powershell -File scripts/push-shell.ps1 "Solve Stage NN: <Title>"
+# Submit Shell changes
+powershell -File scripts/push-shell.ps1 "Stage NN: <Title>"
 ```
