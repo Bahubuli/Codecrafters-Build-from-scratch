@@ -1,4 +1,5 @@
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -12,6 +13,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.zip.GZIPOutputStream;
 
 public class Main {
   private static String directory = null;
@@ -99,7 +101,6 @@ public class Main {
         out.write(response.getBytes(StandardCharsets.UTF_8));
       } else if (path.startsWith("/echo/")) {
         String echoStr = path.substring(6);
-        byte[] bodyBytes = echoStr.getBytes(StandardCharsets.UTF_8);
 
         boolean supportsGzip = false;
         String acceptEncoding = headers.get("Accept-Encoding");
@@ -113,15 +114,22 @@ public class Main {
           }
         }
 
-        StringBuilder response = new StringBuilder("HTTP/1.1 200 OK\r\n");
-        response.append("Content-Type: text/plain\r\n");
         if (supportsGzip) {
-          response.append("Content-Encoding: gzip\r\n");
+          byte[] compressed = gzipCompress(echoStr.getBytes(StandardCharsets.UTF_8));
+          String responseHeader = "HTTP/1.1 200 OK\r\n"
+              + "Content-Type: text/plain\r\n"
+              + "Content-Encoding: gzip\r\n"
+              + "Content-Length: " + compressed.length + "\r\n\r\n";
+          out.write(responseHeader.getBytes(StandardCharsets.UTF_8));
+          out.write(compressed);
+        } else {
+          byte[] bodyBytes = echoStr.getBytes(StandardCharsets.UTF_8);
+          String response = "HTTP/1.1 200 OK\r\n"
+              + "Content-Type: text/plain\r\n"
+              + "Content-Length: " + bodyBytes.length + "\r\n\r\n"
+              + echoStr;
+          out.write(response.getBytes(StandardCharsets.UTF_8));
         }
-        response.append("Content-Length: ").append(bodyBytes.length).append("\r\n\r\n");
-        response.append(echoStr);
-
-        out.write(response.toString().getBytes(StandardCharsets.UTF_8));
       } else if (path.equals("/user-agent")) {
         String userAgent = headers.getOrDefault("User-Agent", "");
         byte[] bodyBytes = userAgent.getBytes(StandardCharsets.UTF_8);
@@ -156,5 +164,13 @@ public class Main {
     } catch (IOException e) {
       System.err.println("Client handling error: " + e.getMessage());
     }
+  }
+
+  private static byte[] gzipCompress(byte[] data) throws IOException {
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    try (GZIPOutputStream gzipOut = new GZIPOutputStream(baos)) {
+      gzipOut.write(data);
+    }
+    return baos.toByteArray();
   }
 }
