@@ -1,6 +1,7 @@
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.util.Arrays;
 
 public class Main {
     public static void main(String[] args) {
@@ -13,26 +14,46 @@ public class Main {
                 serverSocket.receive(packet);
                 System.out.println("Received packet from " + packet.getSocketAddress());
 
-                // Stage 4: Construct DNS response with Question and Answer sections
+                // Stage 5: Parse header section and reflect query parameters
+                byte[] requestBytes = Arrays.copyOfRange(packet.getData(), 0, packet.getLength());
+                DnsMessage requestMessage = DnsMessage.parse(requestBytes);
+                DnsHeader reqHeader = requestMessage.getHeader();
+
+                int rcode = (reqHeader.getOpcode() == 0) ? 0 : 4;
+
                 DnsHeader responseHeader = new DnsHeader(
-                        1234,   // ID: 1234
-                        true,   // QR: 1 (Response)
-                        0,      // OPCODE: 0 (Standard query)
-                        false,  // AA: 0 (Not authoritative)
-                        false,  // TC: 0 (Not truncated)
-                        false,  // RD: 0 (Recursion not desired)
-                        false,  // RA: 0 (Recursion not available)
-                        0,      // Z: 0 (Reserved)
-                        0,      // RCODE: 0 (No error)
-                        1,      // QDCOUNT: 1
-                        1,      // ANCOUNT: 1
-                        0,      // NSCOUNT: 0
-                        0       // ARCOUNT: 0
+                        reqHeader.getId(),      // Mimic the query ID
+                        true,                   // QR: 1 (Response)
+                        reqHeader.getOpcode(),  // Mimic query OPCODE
+                        false,                  // AA: 0 (Not authoritative)
+                        false,                  // TC: 0 (Not truncated)
+                        reqHeader.isRd(),       // Mimic query RD
+                        false,                  // RA: 0 (Recursion not available)
+                        0,                      // Z: 0 (Reserved)
+                        rcode,                  // RCODE: 0 if OPCODE is 0, else 4
+                        0,                      // QDCOUNT (updated by DnsMessage.toBytes())
+                        0,                      // ANCOUNT (updated by DnsMessage.toBytes())
+                        0,                      // NSCOUNT: 0
+                        0                       // ARCOUNT: 0
                 );
 
                 DnsMessage responseMessage = new DnsMessage(responseHeader);
-                responseMessage.addQuestion(new DnsQuestion("codecrafters.io", 1, 1));
-                responseMessage.addAnswer(new DnsRecord("codecrafters.io", 1, 1, 60, new byte[] {8, 8, 8, 8}));
+
+                if (requestMessage.getQuestions() != null && !requestMessage.getQuestions().isEmpty()) {
+                    for (DnsQuestion question : requestMessage.getQuestions()) {
+                        responseMessage.addQuestion(question);
+                        if (reqHeader.getOpcode() == 0) {
+                            responseMessage.addAnswer(new DnsRecord(
+                                    question.getName(),
+                                    1,  // TYPE A
+                                    1,  // CLASS IN
+                                    60, // TTL
+                                    new byte[] {8, 8, 8, 8}
+                            ));
+                        }
+                    }
+                }
+
                 byte[] responseBytes = responseMessage.toBytes();
 
                 final DatagramPacket packetResponse = new DatagramPacket(

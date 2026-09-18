@@ -36,11 +36,11 @@ public class DnsMessage {
         DnsHeader header = DnsHeader.parse(buffer);
         DnsMessage message = new DnsMessage(header);
 
-        for (int i = 0; i < header.getQdCount(); i++) {
+        for (int i = 0; i < header.getQdCount() && buffer.hasRemaining(); i++) {
             message.addQuestion(DnsQuestion.parse(buffer));
         }
 
-        for (int i = 0; i < header.getAnCount(); i++) {
+        for (int i = 0; i < header.getAnCount() && buffer.hasRemaining(); i++) {
             message.addAnswer(DnsRecord.parse(buffer));
         }
 
