@@ -336,12 +336,9 @@ public class Main {
                 out.write(metaReqMsg.array());
                 out.flush();
 
-                // Wait briefly for tester to receive the request
-                try {
-                  System.err.println("SENT METADATA REQ peerUtMetadataId=" + peerUtMetadataId);
-                  PeerMessage resp = readMessage(in);
-                  System.err.println("RESP ID=" + resp.id + " len=" + resp.payload.length);
-                } catch (Exception ignored) {}
+                PeerMessage metaDataMsg = readMessage(in);
+                if (metaDataMsg.id == 20) connected = true;
+                break;
               }
             }
           }
