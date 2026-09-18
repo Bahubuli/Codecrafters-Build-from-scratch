@@ -1,4 +1,5 @@
 import java.io.BufferedReader;
+import java.security.MessageDigest;
 import java.io.ByteArrayOutputStream;
 import java.io.FilterInputStream;
 import java.io.IOException;
@@ -105,6 +106,36 @@ public class Main {
     volatile boolean dirtyCas = false;
     final Set<String> subscribedChannels = ConcurrentHashMap.newKeySet();
     OutputStream out;
+  }
+
+  static class AclUser {
+    final String username;
+    boolean nopass;
+    final List<String> passwords = new CopyOnWriteArrayList<>();
+
+    AclUser(String username, boolean nopass) {
+      this.username = username;
+      this.nopass = nopass;
+    }
+  }
+
+  private static final Map<String, AclUser> aclUsers = new ConcurrentHashMap<>();
+  static {
+    aclUsers.put("default", new AclUser("default", true));
+  }
+
+  private static String sha256Hex(String input) {
+    try {
+      MessageDigest md = MessageDigest.getInstance("SHA-256");
+      byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+      StringBuilder sb = new StringBuilder();
+      for (byte b : digest) {
+        sb.append(String.format("%02x", b));
+      }
+      return sb.toString();
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
   }
 
   private static final Map<String, Entry> store = new ConcurrentHashMap<>();
@@ -1056,11 +1087,44 @@ public class Main {
         out.flush();
       } else if (parts.length >= 3 && parts[1].equalsIgnoreCase("GETUSER")) {
         String username = parts[2];
-        if (username.equals("default")) {
-          out.write("*4\r\n$5\r\nflags\r\n*1\r\n$6\r\nnopass\r\n$9\r\npasswords\r\n*0\r\n".getBytes(StandardCharsets.UTF_8));
-        } else {
+        AclUser user = aclUsers.get(username);
+        if (user == null) {
           out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
+        } else {
+          StringBuilder sb = new StringBuilder();
+          sb.append("*4\r\n");
+          sb.append("$5\r\nflags\r\n");
+          if (user.nopass) {
+            sb.append("*1\r\n$6\r\nnopass\r\n");
+          } else {
+            sb.append("*0\r\n");
+          }
+          sb.append("$9\r\npasswords\r\n");
+          sb.append("*").append(user.passwords.size()).append("\r\n");
+          for (String p : user.passwords) {
+            sb.append("$").append(p.length()).append("\r\n").append(p).append("\r\n");
+          }
+          out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
         }
+        out.flush();
+      } else if (parts.length >= 3 && parts[1].equalsIgnoreCase("SETUSER")) {
+        String username = parts[2];
+        AclUser user = aclUsers.computeIfAbsent(username, u -> new AclUser(u, false));
+        for (int i = 3; i < parts.length; i++) {
+          String rule = parts[i];
+          if (rule.startsWith(">")) {
+            String pass = rule.substring(1);
+            String hash = sha256Hex(pass);
+            if (!user.passwords.contains(hash)) {
+              user.passwords.add(hash);
+            }
+            user.nopass = false;
+          } else if (rule.equalsIgnoreCase("nopass")) {
+            user.nopass = true;
+            user.passwords.clear();
+          }
+        }
+        out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
         out.flush();
       } else {
         out.write("-ERR unknown subcommand or wrong number of arguments for 'ACL'\r\n".getBytes(StandardCharsets.UTF_8));
