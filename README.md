@@ -11,6 +11,7 @@ This monorepo tracks deep-dive implementations of real-world infrastructure syst
 | **Build Your Own Redis** | [`codecrafters-redis-java`](codecrafters-redis-java/) | Java 21 | **100% Completed** (123/123 Stages) | [Redis Challenge](https://app.codecrafters.io/courses/redis/overview) |
 | **Build Your Own HTTP Server** | [`codecrafters-http-server-java`](codecrafters-http-server-java/) | Java 21 | **In Progress** | [HTTP Server Challenge](https://app.codecrafters.io/courses/http-server/overview) |
 | **Build Your Own Shell** | [`codecrafters-shell-java`](codecrafters-shell-java/) | Java 21 | Available | [Shell Challenge](https://app.codecrafters.io/courses/shell/overview) |
+| **Build Your Own Interpreter** | [`codecrafters-interpreter-java`](codecrafters-interpreter-java/) | Java 21 | **In Progress** | [Interpreter Challenge](https://app.codecrafters.io/courses/interpreter/overview) |
 
 ---
 
@@ -52,6 +53,18 @@ POSIX-compliant command-line interpreter:
 
 ---
 
+### 4. Build Your Own Interpreter (`codecrafters-interpreter-java`)
+Full-featured tree-walk interpreter for the Lox programming language (Crafting Interpreters):
+- **Scanning & Lexical Analysis**: Regular expressions, token streams, lexemes, literal preservation, line tracking, error reporting.
+- **Syntactic Analysis (Parsing)**: Context-free grammars, recursive descent parsing, operator precedence and associativity, AST nodes.
+- **Evaluation & Runtime**: Tree-walk expression evaluator, truthiness, unary and binary operations, type checking and runtime error handling.
+- **Statements & State**: Expression statements, print statements, global and local variables, nested lexical environments and block scopes.
+- **Control Flow**: Conditional branching (`if`/`else`), logical operators (`and`/`or` short-circuiting), loops (`while`, `for`).
+- **Functions & Closures**: Function declarations, call expressions, arity checking, return statements, lexical closures.
+- **Classes & OOP**: Class declarations, instantiation, properties, method invocation, `this` binding, constructors.
+
+---
+
 ## Repository Architecture & Remotes
 
 - **Parent Monorepo**: Pushed to GitHub:
@@ -60,6 +73,7 @@ POSIX-compliant command-line interpreter:
   - `redis-codecrafters`: `https://git.codecrafters.io/9300847fe0a03ad5`
   - `http-codecrafters`: `https://git.codecrafters.io/a660f48206a74329`
   - `shell-codecrafters`: `https://git.codecrafters.io/d44f4c8a35fb46bd`
+  - `interpreter-codecrafters`: `https://git.codecrafters.io/45148298d18ce52a`
 
 CodeCrafters isolates tests per challenge repo. Submissions are synced seamlessly from the monorepo to the respective challenge remotes via dedicated scripts:
 
@@ -72,4 +86,7 @@ powershell -File scripts/push-http.ps1 "Stage NN: <Title>"
 
 # Submit Shell changes
 powershell -File scripts/push-shell.ps1 "Stage NN: <Title>"
+
+# Submit Interpreter changes
+powershell -File scripts/push-interpreter.ps1 "Stage NN: <Title>"
 ```

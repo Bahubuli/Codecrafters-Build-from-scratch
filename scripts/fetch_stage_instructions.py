@@ -4,15 +4,15 @@ from pathlib import Path
 
 STATE_FILE = Path.home() / ".codecrafters" / "browser_session.json"
 
-def get_stage_instructions(stage_slug=None):
+def get_stage_instructions(course="bittorrent", stage_slug=None):
     with sync_playwright() as p:
         browser = p.firefox.launch(headless=True)
         context = browser.new_context(storage_state=str(STATE_FILE))
         page = context.new_page()
         if stage_slug:
-            url = f"https://app.codecrafters.io/courses/dns-server/stages/{stage_slug}"
+            url = f"https://app.codecrafters.io/courses/{course}/stages/{stage_slug}"
         else:
-            url = "https://app.codecrafters.io/courses/dns-server/overview"
+            url = f"https://app.codecrafters.io/courses/{course}/overview"
             page.goto(url)
             page.wait_for_timeout(2000)
             resume = page.query_selector("a:has-text('Resume Building'), button:has-text('Resume Building')")
@@ -41,5 +41,6 @@ def get_stage_instructions(stage_slug=None):
         browser.close()
 
 if __name__ == "__main__":
-    slug = sys.argv[1] if len(sys.argv) > 1 else None
-    get_stage_instructions(slug)
+    course = sys.argv[1] if len(sys.argv) > 1 else "bittorrent"
+    slug = sys.argv[2] if len(sys.argv) > 2 else None
+    get_stage_instructions(course, slug)
