@@ -1130,6 +1130,40 @@ public class Main {
         out.write("-ERR unknown subcommand or wrong number of arguments for 'ACL'\r\n".getBytes(StandardCharsets.UTF_8));
         out.flush();
       }
+    } else if (command.equalsIgnoreCase("AUTH")) {
+      String username = "default";
+      String password = "";
+      if (parts.length == 2) {
+        password = parts[1];
+      } else if (parts.length >= 3) {
+        username = parts[1];
+        password = parts[2];
+      } else {
+        out.write("-ERR wrong number of arguments for 'auth' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+
+      AclUser user = aclUsers.get(username);
+      if (user == null) {
+        out.write("-WRONGPASS invalid username-password pair or user is disabled.\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+
+      if (user.nopass) {
+        out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+
+      String hash = sha256Hex(password);
+      if (user.passwords.contains(hash)) {
+        out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
+      } else {
+        out.write("-WRONGPASS invalid username-password pair or user is disabled.\r\n".getBytes(StandardCharsets.UTF_8));
+      }
+      out.flush();
     } else if (command.equalsIgnoreCase("ZRANGE")) {
       if (parts.length < 4) {
         out.write("-ERR wrong number of arguments for 'zrange' command\r\n".getBytes(StandardCharsets.UTF_8));
