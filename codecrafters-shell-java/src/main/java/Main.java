@@ -44,7 +44,7 @@ public class Main {
                     if (BUILTINS.contains(target)) {
                         System.out.println(target + " is a shell builtin");
                     } else {
-                        Path executable = findExecutableInPath(target);
+                        Path executable = findExecutable(target);
                         if (executable != null) {
                             System.out.println(target + " is " + executable);
                         } else {
@@ -53,9 +53,31 @@ public class Main {
                     }
                 }
             } else {
-                System.out.println(input + ": command not found");
+                Path executable = findExecutable(command);
+                if (executable != null) {
+                    ProcessBuilder pb = new ProcessBuilder(parts);
+                    pb.inheritIO();
+                    Process process = pb.start();
+                    process.waitFor();
+                } else {
+                    System.out.println(input + ": command not found");
+                }
             }
         }
+    }
+
+    private static Path findExecutable(String command) {
+        if (command.contains("/") || command.contains(File.separator)) {
+            try {
+                Path path = Paths.get(command);
+                if (Files.isRegularFile(path) && Files.isExecutable(path)) {
+                    return path;
+                }
+            } catch (Exception ignored) {
+            }
+            return null;
+        }
+        return findExecutableInPath(command);
     }
 
     private static Path findExecutableInPath(String command) {
