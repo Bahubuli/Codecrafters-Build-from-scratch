@@ -755,11 +755,14 @@ public class Main {
                 }
                 StringBuilder sb = new StringBuilder();
                 synchronized (commandHistory) {
-                    for (String hCmd : commandHistory) {
-                        sb.append(hCmd).append("\n");
+                    for (int i = lastAppendedHistoryIndex; i < commandHistory.size(); i++) {
+                        sb.append(commandHistory.get(i)).append("\n");
                     }
+                    lastAppendedHistoryIndex = commandHistory.size();
                 }
-                Files.writeString(p, sb.toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+                if (sb.length() > 0) {
+                    Files.writeString(p, sb.toString(), StandardOpenOption.CREATE, StandardOpenOption.APPEND, StandardOpenOption.WRITE);
+                }
             } catch (IOException ignored) {}
         }
     }
