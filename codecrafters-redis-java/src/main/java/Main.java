@@ -1021,7 +1021,7 @@ public class Main {
       out.write((":" + ackedCount + "\r\n").getBytes(StandardCharsets.UTF_8));
       out.flush();
     } else if (command.equalsIgnoreCase("CONFIG")) {
-      // Stage 69: CONFIG GET dir / dbfilename
+      // Stage 69: RDB config - CONFIG GET dir / dbfilename
       if (parts.length >= 3 && parts[1].equalsIgnoreCase("GET")) {
         String param = parts[2].toLowerCase();
         String value;
