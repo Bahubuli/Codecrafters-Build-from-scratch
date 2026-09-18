@@ -211,12 +211,14 @@ public class Main {
 
     private static String readLineWithCompletion() throws IOException {
         StringBuilder line = new StringBuilder();
+        int consecutiveTabs = 0;
         while (true) {
             int ch = System.in.read();
             if (ch == -1) {
                 return line.length() > 0 ? line.toString() : null;
             }
             if (ch == '\n' || ch == '\r') {
+                consecutiveTabs = 0;
                 System.out.print("\n");
                 System.out.flush();
                 return line.toString();
@@ -229,20 +231,39 @@ public class Main {
                     line.append(completion);
                     System.out.print(completion);
                     System.out.flush();
+                    consecutiveTabs = 0;
+                } else if (matches.size() > 1) {
+                    consecutiveTabs++;
+                    if (consecutiveTabs == 1) {
+                        System.out.print("\u0007");
+                        System.out.flush();
+                    } else if (consecutiveTabs >= 2) {
+                        System.out.print("\n");
+                        System.out.print(String.join("  ", matches));
+                        System.out.print("\n");
+                        System.out.print("$ " + current);
+                        System.out.flush();
+                        consecutiveTabs = 0;
+                    }
                 } else {
                     System.out.print("\u0007");
                     System.out.flush();
+                    consecutiveTabs = 0;
                 }
             } else if (ch == 127 || ch == '\b') {
+                consecutiveTabs = 0;
                 if (line.length() > 0) {
                     line.deleteCharAt(line.length() - 1);
                     System.out.print("\b \b");
                     System.out.flush();
                 }
             } else if (ch >= 32) {
+                consecutiveTabs = 0;
                 line.append((char) ch);
                 System.out.print((char) ch);
                 System.out.flush();
+            } else {
+                consecutiveTabs = 0;
             }
         }
     }
