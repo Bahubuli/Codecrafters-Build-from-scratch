@@ -52,6 +52,7 @@ public class Main {
         return;
       }
 
+      String method = parts[0];
       String path = parts[1];
 
       Map<String, String> headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
@@ -65,7 +66,35 @@ public class Main {
         }
       }
 
-      if (path.equals("/")) {
+      int contentLength = 0;
+      if (headers.containsKey("Content-Length")) {
+        try {
+          contentLength = Integer.parseInt(headers.get("Content-Length"));
+        } catch (NumberFormatException ignored) {}
+      }
+
+      char[] bodyChars = new char[contentLength];
+      int totalRead = 0;
+      while (totalRead < contentLength) {
+        int read = reader.read(bodyChars, totalRead, contentLength - totalRead);
+        if (read == -1) break;
+        totalRead += read;
+      }
+      String requestBody = new String(bodyChars, 0, totalRead);
+
+      if (method.equalsIgnoreCase("POST") && path.startsWith("/files/")) {
+        String filename = path.substring(7);
+        if (directory != null) {
+          Path filePath = Paths.get(directory, filename);
+          if (filePath.getParent() != null) {
+            Files.createDirectories(filePath.getParent());
+          }
+          Files.write(filePath, requestBody.getBytes(StandardCharsets.UTF_8));
+          out.write("HTTP/1.1 201 Created\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+        } else {
+          out.write("HTTP/1.1 404 Not Found\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+        }
+      } else if (path.equals("/")) {
         String response = "HTTP/1.1 200 OK\r\n\r\n";
         out.write(response.getBytes(StandardCharsets.UTF_8));
       } else if (path.startsWith("/echo/")) {
