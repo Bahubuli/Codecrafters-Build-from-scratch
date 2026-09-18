@@ -805,6 +805,15 @@ public class Main {
         }
         out.flush();
       }
+    } else if (command.equalsIgnoreCase("GEOADD")) {
+      if (parts.length < 5 || (parts.length - 2) % 3 != 0) {
+        out.write("-ERR wrong number of arguments for 'geoadd' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      } else {
+        int count = (parts.length - 2) / 3;
+        out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      }
     } else if (command.equalsIgnoreCase("ZRANGE")) {
       if (parts.length < 4) {
         out.write("-ERR wrong number of arguments for 'zrange' command\r\n".getBytes(StandardCharsets.UTF_8));
