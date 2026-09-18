@@ -237,7 +237,10 @@ public class Main {
 
                 if (matches.size() == 1) {
                     String match = matches.iterator().next();
-                    String completion = match.substring(word.length()) + " ";
+                    String completion = match.substring(word.length());
+                    if (!match.endsWith("/")) {
+                        completion += " ";
+                    }
                     line.append(completion);
                     System.out.print(completion);
                     System.out.flush();
@@ -322,7 +325,11 @@ public class Main {
                         continue;
                     }
                     if (name.startsWith(namePrefix)) {
-                        candidates.add(dirPart + name);
+                        if (file.isDirectory()) {
+                            candidates.add(dirPart + name + "/");
+                        } else {
+                            candidates.add(dirPart + name);
+                        }
                     }
                 } catch (Exception ignored) {}
             }
