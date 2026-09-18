@@ -1,5 +1,7 @@
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -23,14 +25,26 @@ public class Main {
         }
     }
 
+    static class FileInputPath {
+        final String displayPath;
+        final File file;
+        FileInputPath(String displayPath, File file) {
+            this.displayPath = displayPath;
+            this.file = file;
+        }
+    }
+
     public static void main(String[] args) {
         boolean onlyMatching = false;
+        boolean isRecursive = false;
         ColorMode colorMode = ColorMode.NEVER;
         String pattern = null;
         List<String> filePaths = new ArrayList<>();
 
         for (int i = 0; i < args.length; i++) {
-            if (args[i].equals("-o") || args[i].equals("--only-matching")) {
+            if (args[i].equals("-r") || args[i].equals("--recursive") || args[i].equals("-R")) {
+                isRecursive = true;
+            } else if (args[i].equals("-o") || args[i].equals("--only-matching")) {
                 onlyMatching = true;
             } else if (args[i].equals("--color=always")) {
                 colorMode = ColorMode.ALWAYS;
@@ -70,26 +84,43 @@ public class Main {
         }
 
         if (pattern == null) {
-            System.out.println("Usage: ./your_program.sh [--color=always|auto|never] [-o] -E <pattern> [files...]");
+            System.out.println("Usage: ./your_program.sh [-r] [--color=always|auto|never] [-o] -E <pattern> [files...]");
             System.exit(1);
         }
 
         boolean shouldColor = (colorMode == ColorMode.ALWAYS) || (colorMode == ColorMode.AUTO && isStdoutTty());
-        boolean printFilenamePrefix = filePaths.size() > 1;
 
         List<FileInput> inputs = new ArrayList<>();
         if (filePaths.isEmpty()) {
             inputs.add(new FileInput(null, new Scanner(System.in)));
         } else {
             for (String path : filePaths) {
-                try {
-                    inputs.add(new FileInput(path, new Scanner(new java.io.File(path))));
-                } catch (IOException e) {
+                File f = new File(path);
+                if (isRecursive && f.isDirectory()) {
+                    List<FileInputPath> collected = new ArrayList<>();
+                    collectFiles(f, path, collected);
+                    for (FileInputPath fip : collected) {
+                        try {
+                            inputs.add(new FileInput(fip.displayPath, new Scanner(fip.file)));
+                        } catch (IOException e) {
+                            System.err.println("grep: " + fip.displayPath + ": " + e.getMessage());
+                        }
+                    }
+                } else if (f.isFile()) {
+                    try {
+                        inputs.add(new FileInput(path, new Scanner(f)));
+                    } catch (IOException e) {
+                        System.err.println("grep: " + path + ": " + e.getMessage());
+                    }
+                } else if (f.isDirectory()) {
+                    System.err.println("grep: " + path + ": Is a directory");
+                } else {
                     System.err.println("grep: " + path + ": No such file or directory");
                 }
             }
         }
 
+        boolean printFilenamePrefix = isRecursive || filePaths.size() > 1;
         boolean matchedAny = false;
 
         for (FileInput input : inputs) {
@@ -134,6 +165,23 @@ public class Main {
             System.exit(0);
         } else {
             System.exit(1);
+        }
+    }
+
+    private static void collectFiles(File dir, String displayPath, List<FileInputPath> collected) {
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        Arrays.sort(files, (a, b) -> a.getName().compareTo(b.getName()));
+        for (File child : files) {
+            String childDisplay = (displayPath.endsWith("/") || displayPath.endsWith("\\"))
+                ? displayPath + child.getName()
+                : displayPath + "/" + child.getName();
+            childDisplay = childDisplay.replace('\\', '/');
+            if (child.isDirectory()) {
+                collectFiles(child, childDisplay, collected);
+            } else if (child.isFile()) {
+                collected.add(new FileInputPath(childDisplay, child));
+            }
         }
     }
 
