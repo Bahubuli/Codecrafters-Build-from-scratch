@@ -11,9 +11,9 @@ This monorepo tracks deep-dive implementations of real-world infrastructure syst
 | **Build Your Own Redis** | [`codecrafters-redis-java`](codecrafters-redis-java/) | Java 21 | **100% Completed** (123/123 Stages) | [Redis Challenge](https://app.codecrafters.io/courses/redis/overview) |
 | **Build Your Own HTTP Server** | [`codecrafters-http-server-java`](codecrafters-http-server-java/) | Java 21 | **100% Completed** (14/14 Stages) | [HTTP Server Challenge](https://app.codecrafters.io/courses/http-server/overview) |
 | **Build Your Own DNS Server** | [`codecrafters-dns-server-java`](codecrafters-dns-server-java/) | Java 21 | **100% Completed** (8/8 Stages) | [DNS Server Challenge](https://app.codecrafters.io/courses/dns-server/overview) |
+| **Build Your Own Grep** | [`codecrafters-grep-java`](codecrafters-grep-java/) | Java 21 | **100% Completed** (Base Track - 12/12 Stages) | [Grep Challenge](https://app.codecrafters.io/courses/grep/overview) |
 | **Build Your Own Shell** | [`codecrafters-shell-java`](codecrafters-shell-java/) | Java 21 | Available | [Shell Challenge](https://app.codecrafters.io/courses/shell/overview) |
 | **Build Your Own Interpreter** | [`codecrafters-interpreter-java`](codecrafters-interpreter-java/) | Java 21 | **In Progress** | [Interpreter Challenge](https://app.codecrafters.io/courses/interpreter/overview) |
-| **Build Your Own Grep** | [`codecrafters-grep-java`](codecrafters-grep-java/) | Java 21 | **In Progress** | [Grep Challenge](https://app.codecrafters.io/courses/grep/overview) |
 | **Build Your Own SQLite** | [`codecrafters-sqlite-java`](codecrafters-sqlite-java/) | Java 21 | Available | [SQLite Challenge](https://app.codecrafters.io/courses/sqlite/overview) |
 | **Build Your Own BitTorrent** | [`codecrafters-bittorrent-java`](codecrafters-bittorrent-java/) | Java 21 | Available | [BitTorrent Challenge](https://app.codecrafters.io/courses/bittorrent/overview) |
 
@@ -73,14 +73,35 @@ Full-featured, RFC 1035 compliant UDP DNS forwarding and resolution server built
   - Resolution of 14-bit compression pointers (`0xC0` mask) referencing prior offsets in the message.
   - Composite pointer chaining, cursor preservation, and circular loop protection.
 - **DNS Forwarding Proxy & Multiplexing**:
-  - Upstream resolver integration via `--resolver <ip:port>`.
-  - Query demultiplexing: splitting multi-question incoming queries into isolated single-question datagrams for strict upstream resolvers.
+  - Upstream resolver integration via `--resolver <ip:port>`.\n  - Query demultiplexing: splitting multi-question incoming queries into isolated single-question datagrams for strict upstream resolvers.
   - Upstream response deserialization, record extraction, and response multiplexing into a single downstream reply datagram.
 - **Pedagogical Archive**: All 8 stages fully documented in [`codecrafters-dns-server-java/Tasks/`](codecrafters-dns-server-java/Tasks/).
 
 ---
 
-### 4. Build Your Own Shell (`codecrafters-shell-java`)
+### 4. Build Your Own Grep (`codecrafters-grep-java`)
+Recursive-descent AST parser and backtracking regular expression engine built from first principles (without `java.util.regex`):
+- **Lexing & Pattern AST Architecture**:
+  - Custom recursive descent token parser emitting discrete `PatternNode` AST nodes.
+  - Polymorphic token hierarchy: `LiteralToken`, `DigitToken` (`\d`), `WordToken` (`\w`), `WildcardToken` (`.`).
+  - Positive character groups `[...]` and negative character groups `[^...]` with exact set inclusion.
+- **Compound Pattern Evaluation**:
+  - Sliding-window tape reader iterating prospective substring match origins.
+  - Recursive continuous predicate matching over token sequences.
+- **Anchors & Positional Invariants**:
+  - Start-of-string anchor `^` pinning matching exclusively to index 0.
+  - End-of-string anchor `$` enforcing complete input tape exhaustion.
+- **Greedy Quantifiers with Recursive Backtracking**:
+  - One-or-more quantifier `+` matching maximally with greedy step-down backtracking.
+  - Zero-or-one quantifier `?` attempting 1-character match before taking zero-width $\epsilon$-transition fallback.
+- **Alternation & Capture Groups**:
+  - Parenthesized alternation `(a|b|c)` exploring branching alternative sub-expressions.
+  - Capture group registration and backtracking state preservation.
+- **Pedagogical Archive**: All 12 base stages documented in [`codecrafters-grep-java/Tasks/`](codecrafters-grep-java/Tasks/) adhering to the structured revision card standard.
+
+---
+
+### 5. Build Your Own Shell (`codecrafters-shell-java`)
 POSIX-compliant command-line interpreter:
 - Built-in commands (`echo`, `type`, `exit`, `pwd`, `cd`).
 - `PATH` resolution and external program execution.
@@ -90,7 +111,7 @@ POSIX-compliant command-line interpreter:
 
 ---
 
-### 5. Build Your Own Interpreter (`codecrafters-interpreter-java`)
+### 6. Build Your Own Interpreter (`codecrafters-interpreter-java`)
 Full-featured tree-walk interpreter for the Lox programming language (Crafting Interpreters):
 - **Scanning & Lexical Analysis**: Regular expressions, token streams, lexemes, literal preservation, line tracking, error reporting.
 - **Syntactic Analysis (Parsing)**: Context-free grammars, recursive descent parsing, operator precedence and associativity, AST nodes.
@@ -99,19 +120,6 @@ Full-featured tree-walk interpreter for the Lox programming language (Crafting I
 - **Control Flow**: Conditional branching (`if`/`else`), logical operators (`and`/`or` short-circuiting), loops (`while`, `for`).
 - **Functions & Closures**: Function declarations, call expressions, arity checking, return statements, lexical closures.
 - **Classes & OOP**: Class declarations, instantiation, properties, method invocation, `this` binding, constructors.
-
----
-
-### 6. Build Your Own Grep (`codecrafters-grep-java`)
-Recursive-descent / backtracking regular expression matcher and grep CLI from first principles:
-- **Literals & Character Classes**: Single characters, `\d` (digits), `\w` (word characters).
-- **Character Groups**: Positive groups (`[abc]`), negative groups (`[^abc]`).
-- **Compound Patterns**: Combinations of literal characters and character classes.
-- **Anchors**: Line beginning (`^`) and line ending (`$`).
-- **Quantifiers**: One or more (`+`), zero or one (`?`), zero or more (`*`).
-- **Wildcard**: Any character (`.`).
-- **Alternation**: Disjunction of subpatterns (`(cat|dog)`).
-- **Backreferences**: Single and multiple capture groups with backreference matching (`\1`, `\2`).
 
 ---
 
@@ -141,18 +149,6 @@ powershell -File scripts/push-http.ps1 "Stage NN: <Title>"
 # Submit DNS Server changes
 powershell -File scripts/push-dns.ps1 "Stage NN: <Title>"
 
-# Submit Shell changes
-powershell -File scripts/push-shell.ps1 "Stage NN: <Title>"
-
-# Submit Interpreter changes
-powershell -File scripts/push-interpreter.ps1 "Stage NN: <Title>"
-
 # Submit Grep changes
 powershell -File scripts/push-grep.ps1 "Stage NN: <Title>"
-
-# Submit SQLite changes
-powershell -File scripts/push-sqlite.ps1 "Stage NN: <Title>"
-
-# Submit BitTorrent changes
-powershell -File scripts/push-bittorrent.ps1 "Stage NN: <Title>"
 ```
