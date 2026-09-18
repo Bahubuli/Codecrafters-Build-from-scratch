@@ -6,6 +6,9 @@ import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -25,6 +28,7 @@ public class Main {
   }
 
   private static final Map<String, Entry> store = new ConcurrentHashMap<>();
+  private static final Map<String, List<String>> listStore = new ConcurrentHashMap<>();
 
   public static void main(String[] args) {
     System.out.println("Logs from your program will appear here!");
@@ -96,6 +100,22 @@ public class Main {
                   }
                   out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
                 }
+              } else if (command.equalsIgnoreCase("RPUSH")) {
+                if (parts.length < 3) {
+                  out.write("-ERR wrong number of arguments for 'rpush' command\r\n".getBytes(StandardCharsets.UTF_8));
+                } else {
+                  String key = parts[1];
+                  List<String> list = listStore.computeIfAbsent(key, k -> Collections.synchronizedList(new ArrayList<>()));
+                  int newLength;
+                  synchronized (list) {
+                    for (int i = 2; i < parts.length; i++) {
+                      list.add(parts[i]);
+                    }
+                    newLength = list.size();
+                  }
+                  String response = ":" + newLength + "\r\n";
+                  out.write(response.getBytes(StandardCharsets.UTF_8));
+                }
               }
               out.flush();
             }
@@ -109,4 +129,3 @@ public class Main {
     }
   }
 }
-// Trigger Stage 7 test run
