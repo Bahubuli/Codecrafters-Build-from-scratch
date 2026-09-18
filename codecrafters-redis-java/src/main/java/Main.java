@@ -907,6 +907,14 @@ public class Main {
 
             response = masterReader.readLine();
             System.out.println("Master response to REPLCONF capa: " + response);
+
+            // Handshake Step 3: Send PSYNC ? -1
+            String psyncCmd = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
+            masterOut.write(psyncCmd.getBytes(StandardCharsets.UTF_8));
+            masterOut.flush();
+
+            response = masterReader.readLine();
+            System.out.println("Master response to PSYNC: " + response);
           } catch (IOException e) {
             System.err.println("Replication handshake failed: " + e.getMessage());
           }
