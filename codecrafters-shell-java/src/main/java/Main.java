@@ -582,7 +582,17 @@ public class Main {
             err.flush();
         } else if (command.equals("history")) {
             synchronized (commandHistory) {
-                for (int i = 0; i < commandHistory.size(); i++) {
+                int limit = commandHistory.size();
+                if (cmdArgs.size() > 1) {
+                    try {
+                        int n = Integer.parseInt(cmdArgs.get(1));
+                        if (n >= 0) {
+                            limit = n;
+                        }
+                    } catch (NumberFormatException ignored) {}
+                }
+                int startIndex = Math.max(0, commandHistory.size() - limit);
+                for (int i = startIndex; i < commandHistory.size(); i++) {
                     out.printf("%5d  %s\n", i + 1, commandHistory.get(i));
                 }
             }
