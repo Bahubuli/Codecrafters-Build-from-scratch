@@ -336,11 +336,46 @@ public class Main {
                 out.write(metaReqMsg.array());
                 out.flush();
 
-                connected = true;
-                try {
-                  Thread.sleep(1000);
-                } catch (InterruptedException ignored) {}
-                break;
+                // Receive metadata data message
+                PeerMessage dataResp = null;
+                while (true) {
+                  PeerMessage pre = readMessage(in);
+                  if (pre.id == 20) {
+                    dataResp = pre;
+                    break;
+                  }
+                }
+
+                if (dataResp != null && dataResp.payload.length > 1) {
+                  byte[] dataPayload = Arrays.copyOfRange(dataResp.payload, 1, dataResp.payload.length);
+                  ByteBencodeParser dataParser = new ByteBencodeParser(dataPayload);
+                  @SuppressWarnings("unchecked")
+                  Map<String, Object> headerDict = (Map<String, Object>) dataParser.parse();
+
+                  int infoStart = dataParser.getIndex();
+                  byte[] infoBytes = Arrays.copyOfRange(dataPayload, infoStart, dataPayload.length);
+
+                  ByteBencodeParser infoParser = new ByteBencodeParser(infoBytes);
+                  @SuppressWarnings("unchecked")
+                  Map<String, Object> info = (Map<String, Object>) infoParser.parse();
+
+                  long totalLength = (long) (info.get("length") != null ? (Long) info.get("length") : 0L);
+                  long pieceLength = (Long) info.get("piece length");
+                  byte[] pieces = (byte[]) info.get("pieces");
+
+                  System.out.println("Tracker URL: " + parsed.trackerUrl);
+                  System.out.println("Length: " + totalLength);
+                  System.out.println("Info Hash: " + parsed.infoHash);
+                  System.out.println("Piece Length: " + pieceLength);
+                  System.out.println("Piece Hashes:");
+                  for (int i = 0; i < pieces.length; i += 20) {
+                    byte[] pieceHash = Arrays.copyOfRange(pieces, i, i + 20);
+                    System.out.println(bytesToHex(pieceHash));
+                  }
+
+                  connected = true;
+                  break;
+                }
               }
             }
           }
@@ -727,6 +762,10 @@ public class Main {
 
     public byte[] getRawInfoBytes() {
       return rawInfoBytes;
+    }
+
+    public int getIndex() {
+      return index;
     }
 
     public Object parse() {
