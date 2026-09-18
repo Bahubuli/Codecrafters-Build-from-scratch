@@ -167,8 +167,16 @@ public class Main {
     return defaultName;
   }
 
+  private static final java.util.Set<String> WRITE_COMMANDS = new java.util.HashSet<>(java.util.Arrays.asList(
+      "SET", "DEL", "INCR", "LPUSH", "RPUSH", "LPOP", "RPOP", "XADD"
+  ));
+
   private static void appendToAof(String[] parts) {
-    if (!"yes".equalsIgnoreCase(appendOnly) || activeAofFile == null) {
+    if (!"yes".equalsIgnoreCase(appendOnly) || activeAofFile == null || parts == null || parts.length == 0) {
+      return;
+    }
+    String cmd = parts[0].toUpperCase();
+    if (!WRITE_COMMANDS.contains(cmd)) {
       return;
     }
     StringBuilder sb = new StringBuilder();
