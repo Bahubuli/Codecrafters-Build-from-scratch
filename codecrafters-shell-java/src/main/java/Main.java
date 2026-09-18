@@ -24,6 +24,7 @@ import java.util.regex.Pattern;
 public class Main {
     private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "complete", "jobs", "history", "declare");
     private static final Map<String, String> COMPLETION_SPECS = new HashMap<>();
+    private static final Map<String, String> SHELL_VARIABLES = new HashMap<>();
     private static Path currentDir = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
     private static final AtomicInteger nextJobId = new AtomicInteger(1);
 
@@ -665,13 +666,27 @@ public class Main {
                 if (cmdArgs.size() > 2) {
                     for (int i = 2; i < cmdArgs.size(); i++) {
                         String varName = cmdArgs.get(i);
-                        err.println("declare: " + varName + ": not found");
-                        exitCode = 1;
+                        if (SHELL_VARIABLES.containsKey(varName)) {
+                            out.println("declare -- " + varName + "=\"" + SHELL_VARIABLES.get(varName) + "\"");
+                        } else {
+                            err.println("declare: " + varName + ": not found");
+                            exitCode = 1;
+                        }
                     }
                 }
                 err.flush();
                 out.flush();
                 return exitCode;
+            } else if (!inSubshell) {
+                for (int i = 1; i < cmdArgs.size(); i++) {
+                    String arg = cmdArgs.get(i);
+                    int eqIndex = arg.indexOf('=');
+                    if (eqIndex != -1) {
+                        String name = arg.substring(0, eqIndex);
+                        String value = arg.substring(eqIndex + 1);
+                        SHELL_VARIABLES.put(name, value);
+                    }
+                }
             }
             out.flush();
         } else if (command.equals("jobs")) {
