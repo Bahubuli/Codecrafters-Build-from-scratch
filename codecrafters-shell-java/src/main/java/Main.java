@@ -23,6 +23,22 @@ public class Main {
     private static Path currentDir = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
     private static final AtomicInteger nextJobId = new AtomicInteger(1);
 
+    static class Job {
+        int id;
+        long pid;
+        String command;
+        Process process;
+
+        Job(int id, long pid, String command, Process process) {
+            this.id = id;
+            this.pid = pid;
+            this.command = command;
+            this.process = process;
+        }
+    }
+
+    private static final List<Job> backgroundJobs = new ArrayList<>();
+
     public static void main(String[] args) throws Exception {
         enableRawMode();
 
@@ -208,7 +224,11 @@ public class Main {
                             COMPLETION_SPECS.put(target, scriptPath);
                         }
                     } else if (command.equals("jobs")) {
-                        // Empty implementation for stage 45 (#af3)
+                        for (int j = 0; j < backgroundJobs.size(); j++) {
+                            Job job = backgroundJobs.get(j);
+                            String marker = "+";
+                            out.printf("[%d]%s  %-24s%s &\n", job.id, marker, "Running", job.command);
+                        }
                     }
                 } finally {
                     if (closeOut) {
@@ -237,6 +257,7 @@ public class Main {
                         Process process = pb.start();
                         int jobId = nextJobId.getAndIncrement();
                         long pid = process.pid();
+                        backgroundJobs.add(new Job(jobId, pid, String.join(" ", cmdArgs), process));
                         System.out.println("[" + jobId + "] " + pid);
                         System.out.flush();
                     } else {
