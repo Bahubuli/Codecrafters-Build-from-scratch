@@ -427,6 +427,23 @@ public class Main {
                     startIds[i] = parts[streamsIndex + 1 + numStreams + i];
                   }
 
+                  for (int i = 0; i < numStreams; i++) {
+                    if (startIds[i].equals("$")) {
+                      List<StreamEntry> stream = streamStore.get(keys[i]);
+                      if (stream != null && !stream.isEmpty()) {
+                        synchronized (stream) {
+                          if (!stream.isEmpty()) {
+                            startIds[i] = stream.get(stream.size() - 1).id;
+                          } else {
+                            startIds[i] = "0-0";
+                          }
+                        }
+                      } else {
+                        startIds[i] = "0-0";
+                      }
+                    }
+                  }
+
                   long deadline = (blockTimeout == 0) ? Long.MAX_VALUE : (System.currentTimeMillis() + blockTimeout);
                   List<StreamResult> matching = queryMatchingEntries(keys, startIds);
 
