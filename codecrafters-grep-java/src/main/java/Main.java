@@ -304,9 +304,11 @@ public class Main {
 
     static class BackreferenceNode implements PatternNode {
         final int groupNum;
+        final Quantifier quantifier;
 
-        BackreferenceNode(int groupNum) {
+        BackreferenceNode(int groupNum, Quantifier quantifier) {
             this.groupNum = groupNum;
+            this.quantifier = quantifier;
         }
     }
 
@@ -352,9 +354,13 @@ public class Main {
                 } else if (c == '\\') {
                     if (pos + 1 < pattern.length() && Character.isDigit(pattern.charAt(pos + 1))) {
                         pos++;
-                        int groupNum = pattern.charAt(pos) - '0';
-                        pos++;
-                        nodes.add(new BackreferenceNode(groupNum));
+                        int groupNum = 0;
+                        while (pos < pattern.length() && Character.isDigit(pattern.charAt(pos))) {
+                            groupNum = groupNum * 10 + (pattern.charAt(pos) - '0');
+                            pos++;
+                        }
+                        Quantifier q = parseQuantifier();
+                        nodes.add(new BackreferenceNode(groupNum, q));
                     } else {
                         Token token = parseToken();
                         Quantifier q = parseQuantifier();
@@ -585,8 +591,23 @@ public class Main {
             if (captured == null) {
                 return -1;
             }
-            if (inputLine.startsWith(captured, textIdx)) {
-                return matchEndNodesAt(inputLine, textIdx + captured.length(), nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+            Quantifier q = bn.quantifier;
+            if (captured.isEmpty()) {
+                return matchEndNodesAt(inputLine, textIdx, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+            }
+            int count = 0;
+            while (textIdx + (count + 1) * captured.length() <= inputLine.length() && count < q.max
+                    && inputLine.startsWith(captured, textIdx + count * captured.length())) {
+                count++;
+            }
+            if (count < q.min) {
+                return -1;
+            }
+            for (int rep = count; rep >= q.min; rep--) {
+                int res = matchEndNodesAt(inputLine, textIdx + rep * captured.length(), nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+                if (res != -1) {
+                    return res;
+                }
             }
             return -1;
         }
@@ -636,8 +657,22 @@ public class Main {
         } else if (current instanceof BackreferenceNode) {
             BackreferenceNode bn = (BackreferenceNode) current;
             String captured = capturedGroups.get(bn.groupNum);
-            if (captured != null && inputLine.startsWith(captured, textIdx)) {
-                findBranchMatches(inputLine, textIdx + captured.length(), branchNodes, bIdx + 1, capturedGroups, endPositions);
+            if (captured != null) {
+                Quantifier q = bn.quantifier;
+                if (captured.isEmpty()) {
+                    findBranchMatches(inputLine, textIdx, branchNodes, bIdx + 1, capturedGroups, endPositions);
+                } else {
+                    int count = 0;
+                    while (textIdx + (count + 1) * captured.length() <= inputLine.length() && count < q.max
+                            && inputLine.startsWith(captured, textIdx + count * captured.length())) {
+                        count++;
+                    }
+                    if (count >= q.min) {
+                        for (int rep = count; rep >= q.min; rep--) {
+                            findBranchMatches(inputLine, textIdx + rep * captured.length(), branchNodes, bIdx + 1, capturedGroups, endPositions);
+                        }
+                    }
+                }
             }
         }
     }
