@@ -1,4 +1,5 @@
 import com.google.gson.Gson;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -110,6 +111,41 @@ public class Main {
         for (Map<String, Object> p : peersList) {
           System.out.println(p.get("ip") + ":" + p.get("port"));
         }
+      }
+    } else if ("handshake".equals(command)) {
+      String torrentFilePath = args[1];
+      String peerAddress = args[2];
+      int colonIdx = peerAddress.lastIndexOf(':');
+      String peerIp = peerAddress.substring(0, colonIdx);
+      int peerPort = Integer.parseInt(peerAddress.substring(colonIdx + 1));
+
+      byte[] torrentBytes = Files.readAllBytes(Path.of(torrentFilePath));
+      ByteBencodeParser parser = new ByteBencodeParser(torrentBytes);
+      parser.parse();
+
+      byte[] rawInfoBytes = parser.getRawInfoBytes();
+      MessageDigest md = MessageDigest.getInstance("SHA-1");
+      byte[] infoHashBytes = md.digest(rawInfoBytes);
+
+      byte[] handshake = new byte[68];
+      handshake[0] = 19;
+      byte[] protocolBytes = "BitTorrent protocol".getBytes(StandardCharsets.ISO_8859_1);
+      System.arraycopy(protocolBytes, 0, handshake, 1, 19);
+      // bytes 20..27 are 8 zero reserved bytes
+      System.arraycopy(infoHashBytes, 0, handshake, 28, 20);
+      byte[] myPeerId = "-PC0001-012345678901".getBytes(StandardCharsets.ISO_8859_1);
+      System.arraycopy(myPeerId, 0, handshake, 48, 20);
+
+      try (Socket socket = new Socket(peerIp, peerPort)) {
+        socket.getOutputStream().write(handshake);
+        socket.getOutputStream().flush();
+
+        byte[] response = socket.getInputStream().readNBytes(68);
+        if (response.length < 68) {
+          throw new RuntimeException("Expected 68 bytes in handshake response, got: " + response.length);
+        }
+        byte[] peerId = Arrays.copyOfRange(response, 48, 68);
+        System.out.println("Peer ID: " + bytesToHex(peerId));
       }
     } else {
       System.out.println("Unknown command: " + command);
