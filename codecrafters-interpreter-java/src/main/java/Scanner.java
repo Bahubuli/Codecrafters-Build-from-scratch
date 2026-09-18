@@ -68,6 +68,7 @@ public class Scanner {
                 line++;
                 break;
             default:
+                // Lexical error: unexpected character encountered
                 System.err.println("[line " + line + "] Error: Unexpected character: " + c);
                 hasError = true;
                 break;
