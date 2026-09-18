@@ -167,6 +167,29 @@ public class Main {
       ZSetEntry target = new ZSetEntry(member, score);
       return tree.headSet(target, false).size();
     }
+
+    synchronized List<String> range(int start, int stop) {
+      int n = tree.size();
+      if (n == 0) return Collections.emptyList();
+      if (start < 0) start = n + start;
+      if (stop < 0) stop = n + stop;
+      if (start < 0) start = 0;
+      if (stop >= n) stop = n - 1;
+      if (start > stop || start >= n) return Collections.emptyList();
+
+      List<String> result = new ArrayList<>(stop - start + 1);
+      int idx = 0;
+      for (ZSetEntry entry : tree) {
+        if (idx >= start && idx <= stop) {
+          result.add(entry.member);
+        }
+        if (idx > stop) {
+          break;
+        }
+        idx++;
+      }
+      return result;
+    }
   }
 
   private static final Map<String, List<String>> listStore = new ConcurrentHashMap<>();
@@ -713,6 +736,34 @@ public class Main {
           appendToAof(parts);
         }
         out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
+      }
+    } else if (command.equalsIgnoreCase("ZRANGE")) {
+      if (parts.length < 4) {
+        out.write("-ERR wrong number of arguments for 'zrange' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      } else {
+        String key = parts[1];
+        try {
+          int start = Integer.parseInt(parts[2]);
+          int stop = Integer.parseInt(parts[3]);
+          SortedSet zset = zsetStore.get(key);
+          if (zset == null) {
+            out.write("*0\r\n".getBytes(StandardCharsets.UTF_8));
+            out.flush();
+          } else {
+            List<String> members = zset.range(start, stop);
+            StringBuilder sb = new StringBuilder();
+            sb.append("*").append(members.size()).append("\r\n");
+            for (String m : members) {
+              sb.append("$").append(m.getBytes(StandardCharsets.UTF_8).length).append("\r\n").append(m).append("\r\n");
+            }
+            out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+            out.flush();
+          }
+        } catch (NumberFormatException e) {
+          out.write("-ERR value is not an integer or out of range\r\n".getBytes(StandardCharsets.UTF_8));
+          out.flush();
+        }
       }
     } else if (command.equalsIgnoreCase("ZRANK")) {
       if (parts.length < 3) {
