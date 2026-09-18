@@ -68,6 +68,11 @@ public class Main {
   private static final Object streamNotifier = new Object();
   private static final Object txExecutionLock = new Object();
   private static int port = 6379;
+  private static String role = "master";
+
+  private static String getInfoReplication() {
+    return "role:" + role;
+  }
 
   private static Object getLock(String key) {
     return keyLocks.computeIfAbsent(key, k -> new Object());
@@ -786,6 +791,11 @@ public class Main {
           out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
         }
       }
+    } else if (command.equalsIgnoreCase("INFO")) {
+      String info = getInfoReplication();
+      byte[] bytes = info.getBytes(StandardCharsets.UTF_8);
+      String response = "$" + bytes.length + "\r\n" + info + "\r\n";
+      out.write(response.getBytes(StandardCharsets.UTF_8));
     } else if (command.equalsIgnoreCase("UNWATCH")) {
       out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
     }
