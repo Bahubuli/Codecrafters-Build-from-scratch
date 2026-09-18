@@ -521,7 +521,7 @@ public class Main {
       byte[] fullFile = null;
       for (Peer peer : peers) {
         try (Socket socket = new Socket(peer.ip, peer.port)) {
-          socket.setSoTimeout(25000);
+          socket.setSoTimeout(60000);
           OutputStream out = socket.getOutputStream();
           InputStream in = socket.getInputStream();
 
