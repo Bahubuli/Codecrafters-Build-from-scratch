@@ -1015,6 +1015,79 @@ public class Main {
       }
       out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
       out.flush();
+    } else if (command.equalsIgnoreCase("BITOP")) {
+      if (parts.length < 4) {
+        out.write("-ERR wrong number of arguments for 'bitop' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+      String op = parts[1].toUpperCase();
+      String destKey = stripQuotes(parts[2]);
+      
+      List<byte[]> srcByteArrays = new ArrayList<>();
+      int maxLen = 0;
+      for (int i = 3; i < parts.length; i++) {
+        String sKey = stripQuotes(parts[i]);
+        Entry e = store.get(sKey);
+        if (e == null && !sKey.equals(parts[i])) {
+          e = store.get(parts[i]);
+        }
+        if (e != null && e.isExpired()) {
+          store.remove(sKey);
+          if (!sKey.equals(parts[i])) store.remove(parts[i]);
+          e = null;
+        }
+        byte[] bytes = (e != null && e.rawBytes != null) ? e.rawBytes : new byte[0];
+        srcByteArrays.add(bytes);
+        if (bytes.length > maxLen) {
+          maxLen = bytes.length;
+        }
+      }
+
+      byte[] result = new byte[maxLen];
+      if (maxLen > 0) {
+        if (op.equals("AND")) {
+          byte[] first = srcByteArrays.get(0);
+          for (int j = 0; j < maxLen; j++) {
+            result[j] = (j < first.length) ? first[j] : 0;
+          }
+          for (int i = 1; i < srcByteArrays.size(); i++) {
+            byte[] arr = srcByteArrays.get(i);
+            for (int j = 0; j < maxLen; j++) {
+              byte b = (j < arr.length) ? arr[j] : 0;
+              result[j] = (byte) (result[j] & b);
+            }
+          }
+        } else if (op.equals("OR")) {
+          for (int i = 0; i < srcByteArrays.size(); i++) {
+            byte[] arr = srcByteArrays.get(i);
+            for (int j = 0; j < maxLen; j++) {
+              byte b = (j < arr.length) ? arr[j] : 0;
+              result[j] = (byte) (result[j] | b);
+            }
+          }
+        } else if (op.equals("XOR")) {
+          for (int i = 0; i < srcByteArrays.size(); i++) {
+            byte[] arr = srcByteArrays.get(i);
+            for (int j = 0; j < maxLen; j++) {
+              byte b = (j < arr.length) ? arr[j] : 0;
+              result[j] = (byte) (result[j] ^ b);
+            }
+          }
+        } else if (op.equals("NOT")) {
+          byte[] first = srcByteArrays.get(0);
+          for (int j = 0; j < maxLen; j++) {
+            byte b = (j < first.length) ? first[j] : 0;
+            result[j] = (byte) (~b);
+          }
+        }
+      }
+
+      store.put(destKey, new Entry(result, null));
+      touchWatchedKey(destKey);
+
+      out.write((":" + maxLen + "\r\n").getBytes(StandardCharsets.UTF_8));
+      out.flush();
     } else if (command.equalsIgnoreCase("INCR")) {
       if (parts.length < 2) {
         out.write("-ERR wrong number of arguments for 'incr' command\r\n".getBytes(StandardCharsets.UTF_8));
