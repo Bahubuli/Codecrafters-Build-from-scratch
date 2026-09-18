@@ -72,7 +72,13 @@ public class Main {
   private static String masterHost = null;
   private static int masterPort = -1;
 
+  private static String masterReplId = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
+  private static long masterReplOffset = 0;
+
   private static String getInfoReplication() {
+    if ("master".equalsIgnoreCase(role)) {
+      return "role:master\r\nmaster_replid:" + masterReplId + "\r\nmaster_repl_offset:" + masterReplOffset;
+    }
     return "role:" + role;
   }
 
