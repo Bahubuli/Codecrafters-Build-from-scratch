@@ -890,6 +890,51 @@ public class Main {
 
       out.write((":" + oldBit + "\r\n").getBytes(StandardCharsets.UTF_8));
       out.flush();
+    } else if (command.equalsIgnoreCase("GETBIT")) {
+      if (parts.length < 3) {
+        out.write("-ERR wrong number of arguments for 'getbit' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+      String rawKey = parts[1];
+      String key = stripQuotes(rawKey);
+
+      long offset;
+      try {
+        offset = Long.parseLong(parts[2]);
+      } catch (NumberFormatException e) {
+        out.write("-ERR bit offset is not an integer or out of range\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+      if (offset < 0) {
+        out.write("-ERR bit offset is not an integer or out of range\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+
+      Entry entry = store.get(key);
+      if (entry == null && !key.equals(rawKey)) {
+        entry = store.get(rawKey);
+      }
+      if (entry != null && entry.isExpired()) {
+        store.remove(key);
+        entry = null;
+      }
+
+      int bit = 0;
+      if (entry != null) {
+        byte[] currentBytes = entry.rawBytes;
+        int byteIndex = (int) (offset / 8);
+        if (byteIndex < currentBytes.length) {
+          int bitIndex = 7 - (int) (offset % 8);
+          int bitMask = 1 << bitIndex;
+          bit = (currentBytes[byteIndex] & bitMask) != 0 ? 1 : 0;
+        }
+      }
+
+      out.write((":" + bit + "\r\n").getBytes(StandardCharsets.UTF_8));
+      out.flush();
     } else if (command.equalsIgnoreCase("INCR")) {
       if (parts.length < 2) {
         out.write("-ERR wrong number of arguments for 'incr' command\r\n".getBytes(StandardCharsets.UTF_8));
