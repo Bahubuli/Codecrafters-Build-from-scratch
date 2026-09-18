@@ -8,31 +8,47 @@ import java.util.Scanner;
 import java.util.Set;
 
 public class Main {
+    enum ColorMode {
+        NEVER,
+        ALWAYS,
+        AUTO
+    }
+
     public static void main(String[] args) {
         boolean onlyMatching = false;
-        boolean colorAlways = false;
+        ColorMode colorMode = ColorMode.NEVER;
         String pattern = null;
 
         for (int i = 0; i < args.length; i++) {
             if (args[i].equals("-o") || args[i].equals("--only-matching")) {
                 onlyMatching = true;
             } else if (args[i].equals("--color=always")) {
-                colorAlways = true;
+                colorMode = ColorMode.ALWAYS;
             } else if (args[i].equals("--color=never")) {
-                colorAlways = false;
+                colorMode = ColorMode.NEVER;
             } else if (args[i].equals("--color=auto")) {
-                colorAlways = false;
+                colorMode = ColorMode.AUTO;
             } else if (args[i].startsWith("--color=")) {
                 String val = args[i].substring("--color=".length());
-                colorAlways = "always".equalsIgnoreCase(val);
+                if ("always".equalsIgnoreCase(val)) {
+                    colorMode = ColorMode.ALWAYS;
+                } else if ("auto".equalsIgnoreCase(val)) {
+                    colorMode = ColorMode.AUTO;
+                } else {
+                    colorMode = ColorMode.NEVER;
+                }
             } else if (args[i].equals("--color")) {
                 if (i + 1 < args.length && (args[i + 1].equals("always") || args[i + 1].equals("never") || args[i + 1].equals("auto"))) {
-                    if (args[i + 1].equals("always")) {
-                        colorAlways = true;
+                    String next = args[++i];
+                    if ("always".equalsIgnoreCase(next)) {
+                        colorMode = ColorMode.ALWAYS;
+                    } else if ("auto".equalsIgnoreCase(next)) {
+                        colorMode = ColorMode.AUTO;
+                    } else {
+                        colorMode = ColorMode.NEVER;
                     }
-                    i++;
                 } else {
-                    colorAlways = true;
+                    colorMode = ColorMode.ALWAYS;
                 }
             } else if (args[i].equals("-E")) {
                 if (i + 1 < args.length) {
@@ -42,9 +58,11 @@ public class Main {
         }
 
         if (pattern == null) {
-            System.out.println("Usage: ./your_program.sh [--color=always] [-o] -E <pattern>");
+            System.out.println("Usage: ./your_program.sh [--color=always|auto|never] [-o] -E <pattern>");
             System.exit(1);
         }
+
+        boolean shouldColor = (colorMode == ColorMode.ALWAYS) || (colorMode == ColorMode.AUTO && isStdoutTty());
 
         Scanner scanner = new Scanner(System.in);
         boolean matchedAny = false;
@@ -57,7 +75,7 @@ public class Main {
                     System.out.println(match);
                     matchedAny = true;
                 }
-            } else if (colorAlways) {
+            } else if (shouldColor) {
                 List<int[]> spans = findMatchSpans(line, pattern);
                 if (!spans.isEmpty()) {
                     StringBuilder sb = new StringBuilder();
@@ -86,6 +104,10 @@ public class Main {
         } else {
             System.exit(1);
         }
+    }
+
+    private static boolean isStdoutTty() {
+        return System.console() != null;
     }
 
     interface Token {
@@ -126,11 +148,8 @@ public class Main {
 
     static class PositiveGroupToken implements Token {
         private final Set<Character> chars;
-        public PositiveGroupToken(String characters) {
-            this.chars = new HashSet<>();
-            for (char c : characters.toCharArray()) {
-                this.chars.add(c);
-            }
+        public PositiveGroupToken(Set<Character> chars) {
+            this.chars = chars;
         }
         @Override
         public boolean matches(char c) {
@@ -140,11 +159,8 @@ public class Main {
 
     static class NegativeGroupToken implements Token {
         private final Set<Character> chars;
-        public NegativeGroupToken(String characters) {
-            this.chars = new HashSet<>();
-            for (char c : characters.toCharArray()) {
-                this.chars.add(c);
-            }
+        public NegativeGroupToken(Set<Character> chars) {
+            this.chars = chars;
         }
         @Override
         public boolean matches(char c) {
@@ -171,14 +187,14 @@ public class Main {
     }
 
     static class GroupNode implements PatternNode {
-        final int groupId;
-        final List<List<PatternNode>> alternatives;
+        final List<List<PatternNode>> branches;
         final Quantifier quantifier;
+        final int groupId;
 
-        GroupNode(int groupId, List<List<PatternNode>> alternatives, Quantifier quantifier) {
-            this.groupId = groupId;
-            this.alternatives = alternatives;
+        GroupNode(List<List<PatternNode>> branches, Quantifier quantifier, int groupId) {
+            this.branches = branches;
             this.quantifier = quantifier;
+            this.groupId = groupId;
         }
     }
 
@@ -192,107 +208,106 @@ public class Main {
 
     static class Parser {
         private final String pattern;
-        private int pos = 0;
+        private int pos;
         private int nextGroupId = 1;
 
         Parser(String pattern) {
             this.pattern = pattern;
+            this.pos = 0;
         }
 
         List<PatternNode> parse() {
-            return parseSequence(-1);
+            return parseSequence(false);
         }
 
-        private List<PatternNode> parseSequence(int stopChar) {
+        private List<PatternNode> parseSequence(boolean insideGroup) {
             List<PatternNode> nodes = new ArrayList<>();
             while (pos < pattern.length()) {
                 char c = pattern.charAt(pos);
-                if (stopChar != -1 && (c == stopChar || c == '|')) {
+                if (insideGroup && (c == ')' || c == '|')) {
                     break;
                 }
 
                 if (c == '(') {
-                    pos++; // consume '('
-                    int currentGroupId = nextGroupId++;
-                    List<List<PatternNode>> alternatives = new ArrayList<>();
-
-                    while (pos < pattern.length() && pattern.charAt(pos) != ')') {
-                        List<PatternNode> altNodes = parseSequence(')');
-                        alternatives.add(altNodes);
+                    pos++;
+                    int gid = nextGroupId++;
+                    List<List<PatternNode>> branches = new ArrayList<>();
+                    while (true) {
+                        branches.add(parseSequence(true));
                         if (pos < pattern.length() && pattern.charAt(pos) == '|') {
-                            pos++; // consume '|'
+                            pos++;
+                        } else {
+                            break;
                         }
                     }
                     if (pos < pattern.length() && pattern.charAt(pos) == ')') {
-                        pos++; // consume ')'
-                    }
-
-                    Quantifier q = parseQuantifier();
-                    nodes.add(new GroupNode(currentGroupId, alternatives, q));
-                } else if (c == '\\') {
-                    if (pos + 1 < pattern.length()) {
-                        char next = pattern.charAt(pos + 1);
-                        if (Character.isDigit(next) && next != '0') {
-                            int groupNum = next - '0';
-                            pos += 2;
-                            nodes.add(new BackreferenceNode(groupNum));
-                        } else if (next == 'd') {
-                            pos += 2;
-                            Quantifier q = parseQuantifier();
-                            nodes.add(new TokenNode(new DigitToken(), q));
-                        } else if (next == 'w') {
-                            pos += 2;
-                            Quantifier q = parseQuantifier();
-                            nodes.add(new TokenNode(new WordToken(), q));
-                        } else {
-                            pos += 2;
-                            Quantifier q = parseQuantifier();
-                            nodes.add(new TokenNode(new LiteralToken(next), q));
-                        }
-                    } else {
                         pos++;
-                        Quantifier q = parseQuantifier();
-                        nodes.add(new TokenNode(new LiteralToken('\\'), q));
                     }
-                } else if (c == '.') {
-                    pos++;
                     Quantifier q = parseQuantifier();
-                    nodes.add(new TokenNode(new WildcardToken(), q));
-                } else if (c == '[') {
-                    int closing = pattern.indexOf(']', pos + 1);
-                    if (closing != -1) {
-                        Token token;
-                        if (pos + 1 < pattern.length() && pattern.charAt(pos + 1) == '^') {
-                            String groupChars = pattern.substring(pos + 2, closing);
-                            token = new NegativeGroupToken(groupChars);
-                        } else {
-                            String groupChars = pattern.substring(pos + 1, closing);
-                            token = new PositiveGroupToken(groupChars);
-                        }
-                        pos = closing + 1;
+                    nodes.add(new GroupNode(branches, q, gid));
+                } else if (c == '\\') {
+                    if (pos + 1 < pattern.length() && Character.isDigit(pattern.charAt(pos + 1))) {
+                        pos++;
+                        int groupNum = pattern.charAt(pos) - '0';
+                        pos++;
+                        nodes.add(new BackreferenceNode(groupNum));
+                    } else {
+                        Token token = parseToken();
                         Quantifier q = parseQuantifier();
                         nodes.add(new TokenNode(token, q));
-                    } else {
-                        pos++;
-                        Quantifier q = parseQuantifier();
-                        nodes.add(new TokenNode(new LiteralToken(c), q));
                     }
                 } else {
-                    pos++;
+                    Token token = parseToken();
                     Quantifier q = parseQuantifier();
-                    nodes.add(new TokenNode(new LiteralToken(c), q));
+                    nodes.add(new TokenNode(token, q));
                 }
             }
             return nodes;
         }
 
+        private Token parseToken() {
+            char c = pattern.charAt(pos);
+            if (c == '\\') {
+                pos++;
+                char escaped = pattern.charAt(pos++);
+                if (escaped == 'd') {
+                    return new DigitToken();
+                } else if (escaped == 'w') {
+                    return new WordToken();
+                } else {
+                    return new LiteralToken(escaped);
+                }
+            } else if (c == '[') {
+                pos++;
+                boolean isNegative = false;
+                if (pos < pattern.length() && pattern.charAt(pos) == '^') {
+                    isNegative = true;
+                    pos++;
+                }
+                Set<Character> chars = new HashSet<>();
+                while (pos < pattern.length() && pattern.charAt(pos) != ']') {
+                    chars.add(pattern.charAt(pos++));
+                }
+                if (pos < pattern.length() && pattern.charAt(pos) == ']') {
+                    pos++;
+                }
+                return isNegative ? new NegativeGroupToken(chars) : new PositiveGroupToken(chars);
+            } else if (c == '.') {
+                pos++;
+                return new WildcardToken();
+            } else {
+                pos++;
+                return new LiteralToken(c);
+            }
+        }
+
         private Quantifier parseQuantifier() {
             if (pos < pattern.length()) {
-                char c = pattern.charAt(pos);
-                if (c == '+') {
+                char next = pattern.charAt(pos);
+                if (next == '+') {
                     pos++;
                     return Quantifier.ONE_OR_MORE;
-                } else if (c == '?') {
+                } else if (next == '?') {
                     pos++;
                     return Quantifier.ZERO_OR_ONE;
                 }
@@ -302,7 +317,7 @@ public class Main {
     }
 
     public static boolean matchPattern(String inputLine, String pattern) {
-        return !findMatchSpans(inputLine, pattern).isEmpty();
+        return findFirstMatch(inputLine, pattern) != null;
     }
 
     public static String findFirstMatch(String inputLine, String pattern) {
@@ -311,8 +326,8 @@ public class Main {
     }
 
     public static List<String> findAllMatches(String inputLine, String pattern) {
-        List<int[]> spans = findMatchSpans(inputLine, pattern);
         List<String> results = new ArrayList<>();
+        List<int[]> spans = findMatchSpans(inputLine, pattern);
         for (int[] span : spans) {
             results.add(inputLine.substring(span[0], span[1]));
         }
@@ -430,13 +445,12 @@ public class Main {
             }
         } else if (current instanceof GroupNode) {
             GroupNode gn = (GroupNode) current;
-            for (List<PatternNode> branch : gn.alternatives) {
-                List<Integer> endPositions = new ArrayList<>();
-                findBranchMatches(inputLine, textIdx, branch, 0, capturedGroups, endPositions);
-                for (int endPos : endPositions) {
-                    String captured = inputLine.substring(textIdx, endPos);
+            for (List<PatternNode> branch : gn.branches) {
+                List<Integer> branchEnds = new ArrayList<>();
+                findBranchMatches(inputLine, textIdx, branch, 0, capturedGroups, branchEnds);
+                for (int endPos : branchEnds) {
                     Map<Integer, String> newCaptured = new HashMap<>(capturedGroups);
-                    newCaptured.put(gn.groupId, captured);
+                    newCaptured.put(gn.groupId, inputLine.substring(textIdx, endPos));
                     int res = matchEndNodesAt(inputLine, endPos, nodes, nodeIdx + 1, anchorEnd, newCaptured);
                     if (res != -1) {
                         return res;
