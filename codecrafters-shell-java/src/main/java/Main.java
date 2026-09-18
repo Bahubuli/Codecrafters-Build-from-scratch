@@ -12,7 +12,7 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 public class Main {
-    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd");
+    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "complete");
     private static Path currentDir = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
 
     public static void main(String[] args) throws Exception {
@@ -159,6 +159,8 @@ public class Main {
                         } else {
                             System.out.println("cd: " + targetPath + ": No such file or directory");
                         }
+                    } else if (command.equals("complete")) {
+                        // complete builtin implementation (stubbed for now)
                     }
                 } finally {
                     if (closeOut) {
