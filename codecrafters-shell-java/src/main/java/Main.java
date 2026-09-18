@@ -2,7 +2,8 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -20,28 +21,27 @@ public class Main {
                 break;
             }
             String input = scanner.nextLine();
-            String trimmed = input.trim();
-            if (trimmed.isEmpty()) {
+            List<String> parsedArgs = parseArguments(input);
+            if (parsedArgs.isEmpty()) {
                 continue;
             }
-            String[] parts = trimmed.split("\\s+");
-            String command = parts[0];
+            String command = parsedArgs.get(0);
 
             if (command.equals("exit")) {
                 int exitCode = 0;
-                if (parts.length > 1) {
+                if (parsedArgs.size() > 1) {
                     try {
-                        exitCode = Integer.parseInt(parts[1]);
+                        exitCode = Integer.parseInt(parsedArgs.get(1));
                     } catch (NumberFormatException ignored) {
                     }
                 }
                 System.exit(exitCode);
             } else if (command.equals("echo")) {
-                String output = String.join(" ", Arrays.copyOfRange(parts, 1, parts.length));
+                String output = String.join(" ", parsedArgs.subList(1, parsedArgs.size()));
                 System.out.println(output);
             } else if (command.equals("type")) {
-                if (parts.length > 1) {
-                    String target = parts[1];
+                if (parsedArgs.size() > 1) {
+                    String target = parsedArgs.get(1);
                     if (BUILTINS.contains(target)) {
                         System.out.println(target + " is a shell builtin");
                     } else {
@@ -60,7 +60,7 @@ public class Main {
                 if (home == null || home.isEmpty()) {
                     home = System.getProperty("user.home");
                 }
-                String targetPath = parts.length > 1 ? parts[1] : home;
+                String targetPath = parsedArgs.size() > 1 ? parsedArgs.get(1) : home;
                 if (targetPath.equals("~")) {
                     targetPath = home;
                 } else if (targetPath.startsWith("~/")) {
@@ -76,16 +76,52 @@ public class Main {
             } else {
                 Path executable = findExecutable(command);
                 if (executable != null) {
-                    ProcessBuilder pb = new ProcessBuilder(parts);
+                    ProcessBuilder pb = new ProcessBuilder(parsedArgs);
                     pb.directory(currentDir.toFile());
                     pb.inheritIO();
                     Process process = pb.start();
                     process.waitFor();
                 } else {
-                    System.out.println(input + ": command not found");
+                    System.out.println(command + ": command not found");
                 }
             }
         }
+    }
+
+    private static List<String> parseArguments(String input) {
+        List<String> args = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inSingleQuote = false;
+        boolean hasToken = false;
+
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (inSingleQuote) {
+                if (c == '\'') {
+                    inSingleQuote = false;
+                } else {
+                    current.append(c);
+                }
+            } else {
+                if (c == '\'') {
+                    inSingleQuote = true;
+                    hasToken = true;
+                } else if (Character.isWhitespace(c)) {
+                    if (hasToken) {
+                        args.add(current.toString());
+                        current.setLength(0);
+                        hasToken = false;
+                    }
+                } else {
+                    current.append(c);
+                    hasToken = true;
+                }
+            }
+        }
+        if (hasToken) {
+            args.add(current.toString());
+        }
+        return args;
     }
 
     private static Path findExecutable(String command) {
