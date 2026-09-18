@@ -1,5 +1,9 @@
 import com.google.gson.Gson;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,96 +28,133 @@ public class Main {
         return;
       }
       System.out.println(gson.toJson(decoded));
+    } else if ("info".equals(command)) {
+      String torrentFilePath = args[1];
+      byte[] torrentBytes = Files.readAllBytes(Path.of(torrentFilePath));
+      ByteBencodeParser parser = new ByteBencodeParser(torrentBytes);
+      @SuppressWarnings("unchecked")
+      Map<String, Object> torrent = (Map<String, Object>) parser.parse();
+      String announce = (String) torrent.get("announce");
+      @SuppressWarnings("unchecked")
+      Map<String, Object> info = (Map<String, Object>) torrent.get("info");
+      long length = (Long) info.get("length");
+
+      System.out.println("Tracker URL: " + announce);
+      System.out.println("Length: " + length);
     } else {
       System.out.println("Unknown command: " + command);
     }
   }
 
   static Object decodeBencode(String bencodedString) {
-    BencodeParser parser = new BencodeParser(bencodedString);
+    ByteBencodeParser parser = new ByteBencodeParser(bencodedString.getBytes(StandardCharsets.UTF_8));
     return parser.parse();
   }
 
-  static class BencodeParser {
-    private final String src;
+  static class ByteBencodeParser {
+    private final byte[] src;
     private int index = 0;
+    private byte[] rawInfoBytes = null;
 
-    public BencodeParser(String src) {
+    public ByteBencodeParser(byte[] src) {
       this.src = src;
     }
 
+    public byte[] getRawInfoBytes() {
+      return rawInfoBytes;
+    }
+
     public Object parse() {
-      if (index >= src.length()) {
+      if (index >= src.length) {
         throw new RuntimeException("Unexpected end of input");
       }
-      char ch = src.charAt(index);
-      if (Character.isDigit(ch)) {
-        return parseString();
-      } else if (ch == 'i') {
+      byte b = src[index];
+      if (b >= '0' && b <= '9') {
+        return new String(parseStringBytes(), StandardCharsets.UTF_8);
+      } else if (b == 'i') {
         return parseInteger();
-      } else if (ch == 'l') {
+      } else if (b == 'l') {
         return parseList();
-      } else if (ch == 'd') {
+      } else if (b == 'd') {
         return parseDictionary();
       } else {
-        throw new RuntimeException("Unsupported bencode element starting with: " + ch);
+        throw new RuntimeException("Unsupported bencode element starting with byte: " + b);
       }
     }
 
-    private String parseString() {
-      int firstColonIndex = src.indexOf(':', index);
-      if (firstColonIndex == -1) {
+    private byte[] parseStringBytes() {
+      int colonIndex = -1;
+      for (int i = index; i < src.length; i++) {
+        if (src[i] == ':') {
+          colonIndex = i;
+          break;
+        }
+      }
+      if (colonIndex == -1) {
         throw new RuntimeException("Invalid bencoded string: missing colon");
       }
-      int length = Integer.parseInt(src.substring(index, firstColonIndex));
-      int start = firstColonIndex + 1;
+      int length = Integer.parseInt(new String(src, index, colonIndex - index, StandardCharsets.US_ASCII));
+      int start = colonIndex + 1;
       int end = start + length;
-      if (end > src.length()) {
+      if (end > src.length) {
         throw new RuntimeException("Unexpected end of bencoded string");
       }
       index = end;
-      return src.substring(start, end);
+      return Arrays.copyOfRange(src, start, end);
     }
 
     private Long parseInteger() {
-      int endIndex = src.indexOf('e', index);
+      int endIndex = -1;
+      for (int i = index + 1; i < src.length; i++) {
+        if (src[i] == 'e') {
+          endIndex = i;
+          break;
+        }
+      }
       if (endIndex == -1) {
         throw new RuntimeException("Invalid bencoded integer: missing 'e'");
       }
-      String numStr = src.substring(index + 1, endIndex);
+      String numStr = new String(src, index + 1, endIndex - (index + 1), StandardCharsets.US_ASCII);
       index = endIndex + 1;
       return Long.parseLong(numStr);
     }
 
     private List<Object> parseList() {
-      // Consume 'l'
-      index++;
+      index++; // Consume 'l'
       List<Object> list = new ArrayList<>();
-      while (index < src.length() && src.charAt(index) != 'e') {
+      while (index < src.length && src[index] != 'e') {
         list.add(parse());
       }
-      if (index >= src.length() || src.charAt(index) != 'e') {
+      if (index >= src.length || src[index] != 'e') {
         throw new RuntimeException("Invalid bencoded list: missing 'e'");
       }
-      // Consume 'e'
-      index++;
+      index++; // Consume 'e'
       return list;
     }
 
     private Map<String, Object> parseDictionary() {
-      // Consume 'd'
-      index++;
+      index++; // Consume 'd'
       Map<String, Object> map = new LinkedHashMap<>();
-      while (index < src.length() && src.charAt(index) != 'e') {
-        String key = parseString();
-        Object value = parse();
+      while (index < src.length && src[index] != 'e') {
+        byte[] keyBytes = parseStringBytes();
+        String key = new String(keyBytes, StandardCharsets.UTF_8);
+        int valStart = index;
+        Object value;
+        if ("pieces".equals(key)) {
+          value = parseStringBytes();
+        } else {
+          value = parse();
+        }
+        int valEnd = index;
+        if ("info".equals(key)) {
+          this.rawInfoBytes = Arrays.copyOfRange(src, valStart, valEnd);
+        }
         map.put(key, value);
       }
-      if (index >= src.length() || src.charAt(index) != 'e') {
+      if (index >= src.length || src[index] != 'e') {
         throw new RuntimeException("Invalid bencoded dictionary: missing 'e'");
       }
-      // Consume 'e'
-      index++;
+      index++; // Consume 'e'
       return map;
     }
   }
