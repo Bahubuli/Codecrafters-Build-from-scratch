@@ -58,6 +58,9 @@ def get_firefox_cookies():
     return cookies
 
 def main():
+    course = sys.argv[1] if len(sys.argv) > 1 else "redis"
+    target_url = f"https://app.codecrafters.io/courses/{course}/overview"
+
     ff_cookies = get_firefox_cookies()
     print(f"Loaded {len(ff_cookies)} cookies from Firefox profile.")
 
@@ -74,8 +77,8 @@ def main():
 
         page = context.new_page()
 
-        print("Navigating to https://app.codecrafters.io/courses/redis/overview ...")
-        page.goto("https://app.codecrafters.io/courses/redis/overview", wait_until="domcontentloaded")
+        print(f"Navigating to {target_url} ...")
+        page.goto(target_url, wait_until="domcontentloaded")
         time.sleep(3)
 
         # Check if login is needed
@@ -90,7 +93,7 @@ def main():
                 page.wait_for_load_state("networkidle")
                 time.sleep(4)
 
-            page.goto("https://app.codecrafters.io/courses/redis/overview", wait_until="domcontentloaded")
+            page.goto(target_url, wait_until="domcontentloaded")
             time.sleep(3)
 
         context.storage_state(path=str(STATE_FILE))
