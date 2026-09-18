@@ -263,6 +263,48 @@ public class Main {
       MagnetLink parsed = parseMagnetLink(magnetLink);
       System.out.println("Tracker URL: " + parsed.trackerUrl);
       System.out.println("Info Hash: " + parsed.infoHash);
+    } else if ("magnet_handshake".equals(command)) {
+      String magnetLink = args[1];
+      MagnetLink parsed = parseMagnetLink(magnetLink);
+      byte[] infoHashBytes = hexToBytes(parsed.infoHash);
+
+      List<Peer> peers = getPeers(parsed.trackerUrl, infoHashBytes, 999);
+      if (peers.isEmpty()) {
+        throw new RuntimeException("No peers discovered from tracker");
+      }
+
+      byte[] handshake = new byte[68];
+      handshake[0] = 19;
+      byte[] protocolBytes = "BitTorrent protocol".getBytes(StandardCharsets.ISO_8859_1);
+      System.arraycopy(protocolBytes, 0, handshake, 1, 19);
+      // 8 reserved bytes: set 20th bit from right (reserved[5] = 0x10 -> index 25)
+      handshake[25] = 0x10;
+      System.arraycopy(infoHashBytes, 0, handshake, 28, 20);
+      byte[] myPeerId = generatePeerId();
+      System.arraycopy(myPeerId, 0, handshake, 48, 20);
+
+      boolean connected = false;
+      for (Peer peer : peers) {
+        try (Socket socket = new Socket(peer.ip, peer.port)) {
+          socket.setSoTimeout(10000);
+          socket.getOutputStream().write(handshake);
+          socket.getOutputStream().flush();
+
+          byte[] response = socket.getInputStream().readNBytes(68);
+          if (response.length < 68) {
+            continue;
+          }
+          byte[] peerId = Arrays.copyOfRange(response, 48, 68);
+          System.out.println("Peer ID: " + bytesToHex(peerId));
+          connected = true;
+          break;
+        } catch (Exception e) {
+          // Try next peer
+        }
+      }
+      if (!connected) {
+        throw new RuntimeException("Failed to connect and handshake with any peer");
+      }
     } else {
       System.out.println("Unknown command: " + command);
     }
@@ -294,6 +336,15 @@ public class Main {
       }
     }
     return magnet;
+  }
+
+  static byte[] hexToBytes(String hex) {
+    byte[] bytes = new byte[hex.length() / 2];
+    for (int i = 0; i < bytes.length; i++) {
+      int index = i * 2;
+      bytes[i] = (byte) Integer.parseInt(hex.substring(index, index + 2), 16);
+    }
+    return bytes;
   }
 
   static byte[] generatePeerId() {
