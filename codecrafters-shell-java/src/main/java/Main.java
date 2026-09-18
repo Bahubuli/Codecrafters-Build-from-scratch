@@ -270,7 +270,17 @@ public class Main {
                     String firstWord = current.trim().split("\\s+")[0];
                     if (COMPLETION_SPECS.containsKey(firstWord)) {
                         String script = COMPLETION_SPECS.get(firstWord);
-                        List<String> scriptOutput = runCompleterScript(script);
+                        String prevWord = "";
+                        String beforeCurrentWord = current.substring(0, lastSpace).trim();
+                        if (!beforeCurrentWord.isEmpty()) {
+                            int prevSpace = beforeCurrentWord.lastIndexOf(' ');
+                            if (prevSpace == -1) {
+                                prevWord = beforeCurrentWord;
+                            } else {
+                                prevWord = beforeCurrentWord.substring(prevSpace + 1);
+                            }
+                        }
+                        List<String> scriptOutput = runCompleterScript(script, firstWord, word, prevWord);
                         matches = new TreeSet<>(scriptOutput);
                     } else {
                         matches = getFileCompletions(word);
@@ -332,10 +342,10 @@ public class Main {
         }
     }
 
-    private static List<String> runCompleterScript(String scriptPath) {
+    private static List<String> runCompleterScript(String scriptPath, String command, String word, String prevWord) {
         List<String> results = new ArrayList<>();
         try {
-            ProcessBuilder pb = new ProcessBuilder(scriptPath);
+            ProcessBuilder pb = new ProcessBuilder(scriptPath, command, word, prevWord);
             pb.directory(currentDir.toFile());
             Process p = pb.start();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
