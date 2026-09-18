@@ -12,9 +12,9 @@ This monorepo tracks deep-dive implementations of real-world infrastructure syst
 | **Build Your Own HTTP Server** | [`codecrafters-http-server-java`](codecrafters-http-server-java/) | Java 21 | **100% Completed** (14/14 Stages) | [HTTP Server Challenge](https://app.codecrafters.io/courses/http-server/overview) |
 | **Build Your Own DNS Server** | [`codecrafters-dns-server-java`](codecrafters-dns-server-java/) | Java 21 | **100% Completed** (8/8 Stages) | [DNS Server Challenge](https://app.codecrafters.io/courses/dns-server/overview) |
 | **Build Your Own Grep** | [`codecrafters-grep-java`](codecrafters-grep-java/) | Java 21 | **100% Completed** (Base Track - 12/12 Stages) | [Grep Challenge](https://app.codecrafters.io/courses/grep/overview) |
+| **Build Your Own SQLite** | [`codecrafters-sqlite-java`](codecrafters-sqlite-java/) | Java 21 | **100% Completed** (9/9 Stages) | [SQLite Challenge](https://app.codecrafters.io/courses/sqlite/overview) |
 | **Build Your Own Shell** | [`codecrafters-shell-java`](codecrafters-shell-java/) | Java 21 | Available | [Shell Challenge](https://app.codecrafters.io/courses/shell/overview) |
 | **Build Your Own Interpreter** | [`codecrafters-interpreter-java`](codecrafters-interpreter-java/) | Java 21 | **In Progress** | [Interpreter Challenge](https://app.codecrafters.io/courses/interpreter/overview) |
-| **Build Your Own SQLite** | [`codecrafters-sqlite-java`](codecrafters-sqlite-java/) | Java 21 | Available | [SQLite Challenge](https://app.codecrafters.io/courses/sqlite/overview) |
 | **Build Your Own BitTorrent** | [`codecrafters-bittorrent-java`](codecrafters-bittorrent-java/) | Java 21 | Available | [BitTorrent Challenge](https://app.codecrafters.io/courses/bittorrent/overview) |
 
 ---
@@ -73,7 +73,8 @@ Full-featured, RFC 1035 compliant UDP DNS forwarding and resolution server built
   - Resolution of 14-bit compression pointers (`0xC0` mask) referencing prior offsets in the message.
   - Composite pointer chaining, cursor preservation, and circular loop protection.
 - **DNS Forwarding Proxy & Multiplexing**:
-  - Upstream resolver integration via `--resolver <ip:port>`.\n  - Query demultiplexing: splitting multi-question incoming queries into isolated single-question datagrams for strict upstream resolvers.
+  - Upstream resolver integration via `--resolver <ip:port>`.
+  - Query demultiplexing: splitting multi-question incoming queries into isolated single-question datagrams for strict upstream resolvers.
   - Upstream response deserialization, record extraction, and response multiplexing into a single downstream reply datagram.
 - **Pedagogical Archive**: All 8 stages fully documented in [`codecrafters-dns-server-java/Tasks/`](codecrafters-dns-server-java/Tasks/).
 
@@ -101,7 +102,32 @@ Recursive-descent AST parser and backtracking regular expression engine built fr
 
 ---
 
-### 5. Build Your Own Shell (`codecrafters-shell-java`)
+### 5. Build Your Own SQLite (`codecrafters-sqlite-java`)
+Production-grade SQLite database storage engine and query executor implemented from raw binary byte buffers:
+- **Database Header & Page Architecture**:
+  - 100-byte database file header parsing (`page size`, `reserved space`, `text encoding`).
+  - Big-endian byte order manipulation and 64-bit page offset addressing.
+- **B-tree Page Layouts & Parsing**:
+  - Table B-tree pages: Leaf pages (`0x0D`) and Interior pages (`0x05`).
+  - Index B-tree pages: Leaf pages (`0x0A`) and Interior pages (`0x02`).
+  - Cell pointer array traversal, cell content decoding, and rightmost child routing.
+- **Varint Decoding & Record Serialization Format**:
+  - SQLite variable-length integer (varint) decoding (up to 9 bytes with high-bit continuation).
+  - Record header parsing: serial type codes (integers 1-6, 8/9 constants, floats 7, UTF-8 strings $\ge 13$, blobs $\ge 12$).
+- **Schema Discovery & SQL Parser**:
+  - Reading `sqlite_schema` (tables, indexes, root pages, column definitions).
+  - Robust `CREATE TABLE` and `CREATE INDEX` SQL parsing with identifier quote stripping (`"`, `'`, `` ` ``, `[]`).
+  - Support for `INTEGER PRIMARY KEY` rowid aliasing.
+- **Relational Query Execution**:
+  - Multi-column projection and delimiter formatting (`col1|col2|...`).
+  - Filter evaluation with `WHERE` equality predicates against literal values.
+  - Full-table multi-page B-tree scans across interior and leaf pages.
+  - Index-driven query optimization: $O(\log N)$ range search over secondary index B-trees combined with point lookups on table B-trees, servicing queries on gigabyte databases in milliseconds.
+- **Pedagogical Archive**: All 9 stages completely documented in [`codecrafters-sqlite-java/Tasks/`](codecrafters-sqlite-java/Tasks/).
+
+---
+
+### 6. Build Your Own Shell (`codecrafters-shell-java`)
 POSIX-compliant command-line interpreter:
 - Built-in commands (`echo`, `type`, `exit`, `pwd`, `cd`).
 - `PATH` resolution and external program execution.
@@ -111,7 +137,7 @@ POSIX-compliant command-line interpreter:
 
 ---
 
-### 6. Build Your Own Interpreter (`codecrafters-interpreter-java`)
+### 7. Build Your Own Interpreter (`codecrafters-interpreter-java`)
 Full-featured tree-walk interpreter for the Lox programming language (Crafting Interpreters):
 - **Scanning & Lexical Analysis**: Regular expressions, token streams, lexemes, literal preservation, line tracking, error reporting.
 - **Syntactic Analysis (Parsing)**: Context-free grammars, recursive descent parsing, operator precedence and associativity, AST nodes.
@@ -151,4 +177,7 @@ powershell -File scripts/push-dns.ps1 "Stage NN: <Title>"
 
 # Submit Grep changes
 powershell -File scripts/push-grep.ps1 "Stage NN: <Title>"
+
+# Submit SQLite changes
+powershell -File scripts/push-sqlite.ps1 "Stage NN: <Title>"
 ```
