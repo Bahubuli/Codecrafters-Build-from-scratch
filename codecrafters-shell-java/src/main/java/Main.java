@@ -6,13 +6,16 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 public class Main {
     private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "complete");
+    private static final Map<String, String> COMPLETION_SPECS = new HashMap<>();
     private static Path currentDir = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
 
     public static void main(String[] args) throws Exception {
@@ -175,7 +178,15 @@ public class Main {
                     } else if (command.equals("complete")) {
                         if (cmdArgs.size() >= 3 && cmdArgs.get(1).equals("-p")) {
                             String target = cmdArgs.get(2);
-                            err.println("complete: " + target + ": no completion specification");
+                            if (COMPLETION_SPECS.containsKey(target)) {
+                                out.println("complete -C '" + COMPLETION_SPECS.get(target) + "' " + target);
+                            } else {
+                                err.println("complete: " + target + ": no completion specification");
+                            }
+                        } else if (cmdArgs.size() >= 4 && cmdArgs.get(1).equals("-C")) {
+                            String scriptPath = cmdArgs.get(2);
+                            String target = cmdArgs.get(3);
+                            COMPLETION_SPECS.put(target, scriptPath);
                         }
                     }
                 } finally {
