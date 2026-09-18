@@ -121,6 +121,8 @@ public class Main {
   private static String appendDirName = "appendonlydir";
   private static String appendFilename = "appendonly.aof";
   private static String appendFsync = "everysec";
+  private static final Object aofLock = new Object();
+  private static java.io.File activeAofFile = null;
 
   private static String masterReplId = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
   private static volatile long masterReplOffset = 0;
@@ -135,6 +137,60 @@ public class Main {
       return "role:master\r\nmaster_replid:" + masterReplId + "\r\nmaster_repl_offset:" + masterReplOffset;
     }
     return "role:" + role;
+  }
+
+  private static String getActiveIncrAofFilename(java.io.File manifestFile, String defaultName) {
+    if (manifestFile != null && manifestFile.exists()) {
+      try {
+        java.util.List<String> lines = java.nio.file.Files.readAllLines(manifestFile.toPath(), StandardCharsets.UTF_8);
+        for (String line : lines) {
+          line = line.trim();
+          if (line.isEmpty() || line.startsWith("#")) continue;
+          String[] parts = line.split("\\s+");
+          String fileName = null;
+          String type = null;
+          for (int i = 0; i < parts.length; i++) {
+            if ("file".equalsIgnoreCase(parts[i]) && i + 1 < parts.length) {
+              fileName = parts[i + 1];
+            } else if ("type".equalsIgnoreCase(parts[i]) && i + 1 < parts.length) {
+              type = parts[i + 1];
+            }
+          }
+          if ("i".equalsIgnoreCase(type) && fileName != null) {
+            return fileName;
+          }
+        }
+      } catch (java.io.IOException e) {
+        System.err.println("Error reading AOF manifest: " + e.getMessage());
+      }
+    }
+    return defaultName;
+  }
+
+  private static void appendToAof(String[] parts) {
+    if (!"yes".equalsIgnoreCase(appendOnly) || activeAofFile == null) {
+      return;
+    }
+    StringBuilder sb = new StringBuilder();
+    sb.append("*").append(parts.length).append("\r\n");
+    for (int i = 0; i < parts.length; i++) {
+      String token = (i == 0) ? parts[i].toUpperCase() : parts[i];
+      byte[] b = token.getBytes(StandardCharsets.UTF_8);
+      sb.append("$").append(b.length).append("\r\n").append(token).append("\r\n");
+    }
+    byte[] bytes = sb.toString().getBytes(StandardCharsets.UTF_8);
+
+    synchronized (aofLock) {
+      try (java.io.FileOutputStream fos = new java.io.FileOutputStream(activeAofFile, true)) {
+        fos.write(bytes);
+        fos.flush();
+        if ("always".equalsIgnoreCase(appendFsync)) {
+          fos.getFD().sync();
+        }
+      } catch (java.io.IOException e) {
+        System.err.println("Error appending to AOF: " + e.getMessage());
+      }
+    }
   }
 
   private static synchronized void propagate(String[] parts) {
@@ -328,7 +384,9 @@ public class Main {
 
       store.put(key, new Entry(value, expiresAt));
       touchWatchedKey(key);
+      appendToAof(parts);
       out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
+      out.flush();
       propagate(parts);
     } else if (command.equalsIgnoreCase("GET")) {
       if (parts.length < 2) {
@@ -1375,7 +1433,7 @@ public class Main {
     // Stage 72: Load RDB file at startup
     loadRdb();
 
-    // Stage 76 & 77: Create append-only directory and initial incremental file if enabled
+    // Stage 76 & 77 & 78 & 79: AOF persistence bootstrap
     if ("yes".equalsIgnoreCase(appendOnly)) {
       String baseDir = (rdbDir != null && !rdbDir.isEmpty()) ? rdbDir : System.getProperty("user.dir");
       java.io.File aofDir = (appendDirName != null && !appendDirName.isEmpty())
@@ -1387,22 +1445,34 @@ public class Main {
       String baseFileName = (appendFilename != null && !appendFilename.isEmpty())
           ? appendFilename
           : "appendonly.aof";
-      java.io.File incrFile = new java.io.File(aofDir, baseFileName + ".1.incr.aof");
-      try {
-        if (!incrFile.exists()) {
-          incrFile.createNewFile();
+
+      java.io.File manifestFile = new java.io.File(aofDir, baseFileName + ".manifest");
+      if (!manifestFile.exists()) {
+        java.io.File incrFile = new java.io.File(aofDir, baseFileName + ".1.incr.aof");
+        try {
+          if (!incrFile.exists()) {
+            incrFile.createNewFile();
+          }
+        } catch (java.io.IOException e) {
+          System.err.println("Failed to create incremental AOF file: " + e.getMessage());
         }
-      } catch (java.io.IOException e) {
-        System.err.println("Failed to create incremental AOF file: " + e.getMessage());
+
+        try {
+          String manifestContent = "file " + baseFileName + ".1.incr.aof seq 1 type i\n";
+          java.nio.file.Files.write(manifestFile.toPath(), manifestContent.getBytes(StandardCharsets.UTF_8));
+        } catch (java.io.IOException e) {
+          System.err.println("Failed to write AOF manifest file: " + e.getMessage());
+        }
       }
 
-      // Stage 78: Create manifest file
-      java.io.File manifestFile = new java.io.File(aofDir, baseFileName + ".manifest");
+      String activeIncrName = getActiveIncrAofFilename(manifestFile, baseFileName + ".1.incr.aof");
+      activeAofFile = new java.io.File(aofDir, activeIncrName);
       try {
-        String manifestContent = "file " + baseFileName + ".1.incr.aof seq 1 type i\n";
-        java.nio.file.Files.write(manifestFile.toPath(), manifestContent.getBytes(StandardCharsets.UTF_8));
+        if (!activeAofFile.exists()) {
+          activeAofFile.createNewFile();
+        }
       } catch (java.io.IOException e) {
-        System.err.println("Failed to write AOF manifest file: " + e.getMessage());
+        System.err.println("Failed to ensure active AOF file: " + e.getMessage());
       }
     }
 
