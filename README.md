@@ -12,6 +12,7 @@ This monorepo tracks deep-dive implementations of real-world infrastructure syst
 | **Build Your Own HTTP Server** | [`codecrafters-http-server-java`](codecrafters-http-server-java/) | Java 21 | **In Progress** | [HTTP Server Challenge](https://app.codecrafters.io/courses/http-server/overview) |
 | **Build Your Own Shell** | [`codecrafters-shell-java`](codecrafters-shell-java/) | Java 21 | Available | [Shell Challenge](https://app.codecrafters.io/courses/shell/overview) |
 | **Build Your Own Interpreter** | [`codecrafters-interpreter-java`](codecrafters-interpreter-java/) | Java 21 | **In Progress** | [Interpreter Challenge](https://app.codecrafters.io/courses/interpreter/overview) |
+| **Build Your Own Grep** | [`codecrafters-grep-java`](codecrafters-grep-java/) | Java 21 | **In Progress** | [Grep Challenge](https://app.codecrafters.io/courses/grep/overview) |
 
 ---
 
@@ -65,6 +66,19 @@ Full-featured tree-walk interpreter for the Lox programming language (Crafting I
 
 ---
 
+### 5. Build Your Own Grep (`codecrafters-grep-java`)
+Recursive-descent / backtracking regular expression matcher and grep CLI from first principles:
+- **Literals & Character Classes**: Single characters, `\d` (digits), `\w` (word characters).
+- **Character Groups**: Positive groups (`[abc]`), negative groups (`[^abc]`).
+- **Compound Patterns**: Combinations of literal characters and character classes.
+- **Anchors**: Line beginning (`^`) and line ending (`$`).
+- **Quantifiers**: One or more (`+`), zero or one (`?`), zero or more (`*`).
+- **Wildcard**: Any character (`.`).
+- **Alternation**: Disjunction of subpatterns (`(cat|dog)`).
+- **Backreferences**: Single and multiple capture groups with backreference matching (`\1`, `\2`).
+
+---
+
 ## Repository Architecture & Remotes
 
 - **Parent Monorepo**: Pushed to GitHub:
@@ -74,6 +88,7 @@ Full-featured tree-walk interpreter for the Lox programming language (Crafting I
   - `http-codecrafters`: `https://git.codecrafters.io/a660f48206a74329`
   - `shell-codecrafters`: `https://git.codecrafters.io/d44f4c8a35fb46bd`
   - `interpreter-codecrafters`: `https://git.codecrafters.io/45148298d18ce52a`
+  - `grep-codecrafters`: `https://git.codecrafters.io/6bc6999955a9e704`
 
 CodeCrafters isolates tests per challenge repo. Submissions are synced seamlessly from the monorepo to the respective challenge remotes via dedicated scripts:
 
@@ -89,4 +104,7 @@ powershell -File scripts/push-shell.ps1 "Stage NN: <Title>"
 
 # Submit Interpreter changes
 powershell -File scripts/push-interpreter.ps1 "Stage NN: <Title>"
+
+# Submit Grep changes
+powershell -File scripts/push-grep.ps1 "Stage NN: <Title>"
 ```
