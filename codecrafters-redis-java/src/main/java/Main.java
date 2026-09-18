@@ -9,6 +9,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Objects;
+import java.util.TreeSet;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -105,8 +108,61 @@ public class Main {
   }
 
   private static final Map<String, Entry> store = new ConcurrentHashMap<>();
+  static class ZSetEntry implements Comparable<ZSetEntry> {
+    final String member;
+    final double score;
+
+    ZSetEntry(String member, double score) {
+      this.member = member;
+      this.score = score;
+    }
+
+    @Override
+    public int compareTo(ZSetEntry o) {
+      int cmp = Double.compare(this.score, o.score);
+      if (cmp != 0) return cmp;
+      return this.member.compareTo(o.member);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (!(o instanceof ZSetEntry)) return false;
+      ZSetEntry other = (ZSetEntry) o;
+      return Double.compare(this.score, other.score) == 0 && this.member.equals(other.member);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(member, score);
+    }
+  }
+
+  static class SortedSet {
+    final Map<String, Double> dict = new HashMap<>();
+    final TreeSet<ZSetEntry> tree = new TreeSet<>();
+
+    synchronized int add(double score, String member) {
+      Double existingScore = dict.get(member);
+      if (existingScore != null) {
+        if (existingScore.doubleValue() == score) {
+          return 0;
+        }
+        tree.remove(new ZSetEntry(member, existingScore));
+        dict.put(member, score);
+        tree.add(new ZSetEntry(member, score));
+        return 0;
+      } else {
+        dict.put(member, score);
+        tree.add(new ZSetEntry(member, score));
+        return 1;
+      }
+    }
+  }
+
   private static final Map<String, List<String>> listStore = new ConcurrentHashMap<>();
   private static final Map<String, List<StreamEntry>> streamStore = new ConcurrentHashMap<>();
+  private static final Map<String, SortedSet> zsetStore = new ConcurrentHashMap<>();
   private static final Map<String, Queue<CompletableFuture<String>>> blockedWaiters = new ConcurrentHashMap<>();
   private static final Map<String, Object> keyLocks = new ConcurrentHashMap<>();
   private static final Map<String, Set<ClientContext>> keyWatchers = new ConcurrentHashMap<>();
@@ -638,6 +694,7 @@ public class Main {
           if (store.remove(key) != null) removed = true;
           if (listStore.remove(key) != null) removed = true;
           if (streamStore.remove(key) != null) removed = true;
+          if (zsetStore.remove(key) != null) removed = true;
           if (removed) {
             touchWatchedKey(key);
             count++;
@@ -647,6 +704,29 @@ public class Main {
           appendToAof(parts);
         }
         out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
+      }
+    } else if (command.equalsIgnoreCase("ZADD")) {
+      if (parts.length < 4 || (parts.length - 2) % 2 != 0) {
+        out.write("-ERR wrong number of arguments for 'zadd' command\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+      } else {
+        String key = parts[1];
+        SortedSet zset = zsetStore.computeIfAbsent(key, k -> new SortedSet());
+        int addedCount = 0;
+        try {
+          for (int i = 2; i < parts.length; i += 2) {
+            double score = Double.parseDouble(parts[i]);
+            String member = parts[i + 1];
+            addedCount += zset.add(score, member);
+          }
+          touchWatchedKey(key);
+          appendToAof(parts);
+          out.write((":" + addedCount + "\r\n").getBytes(StandardCharsets.UTF_8));
+          out.flush();
+        } catch (NumberFormatException e) {
+          out.write("-ERR value is not a valid float\r\n".getBytes(StandardCharsets.UTF_8));
+          out.flush();
+        }
       }
     } else if (command.equalsIgnoreCase("TYPE")) {
       if (parts.length < 2) {
@@ -669,6 +749,8 @@ public class Main {
             out.write("+list\r\n".getBytes(StandardCharsets.UTF_8));
           } else if (streamStore.containsKey(key)) {
             out.write("+stream\r\n".getBytes(StandardCharsets.UTF_8));
+          } else if (zsetStore.containsKey(key)) {
+            out.write("+zset\r\n".getBytes(StandardCharsets.UTF_8));
           } else {
             out.write("+none\r\n".getBytes(StandardCharsets.UTF_8));
           }
