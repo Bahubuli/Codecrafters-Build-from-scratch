@@ -886,6 +886,17 @@ public class Main {
     }
   }
 
+  private static void processReplicaCommand(String[] parts, OutputStream masterOut, OutputStream nullOut) throws IOException {
+    if (parts.length >= 2 && parts[0].equalsIgnoreCase("REPLCONF") && parts[1].equalsIgnoreCase("GETACK")) {
+      // Stage 64: Respond to REPLCONF GETACK * with REPLCONF ACK 0
+      String ack = "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n";
+      masterOut.write(ack.getBytes(StandardCharsets.UTF_8));
+      masterOut.flush();
+    } else {
+      handleCommand(parts, nullOut);
+    }
+  }
+
   public static void main(String[] args) {
     System.out.println("Logs from your program will appear here!");
 
@@ -1032,7 +1043,7 @@ public class Main {
                 }
                 if (complete) {
                   try {
-                    handleCommand(parts, nullOut);
+                    processReplicaCommand(parts, masterOut, nullOut);
                   } catch (Exception e) {
                     System.err.println("Error processing propagated command: " + e.getMessage());
                   }
@@ -1040,7 +1051,7 @@ public class Main {
               } else {
                 String[] parts = line.split("\\s+");
                 try {
-                  handleCommand(parts, nullOut);
+                  processReplicaCommand(parts, masterOut, nullOut);
                 } catch (Exception e) {
                   System.err.println("Error processing inline command: " + e.getMessage());
                 }
