@@ -8,7 +8,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
@@ -180,6 +179,52 @@ public class Main {
           throw new RuntimeException(e);
         }
       }
+      case "commit-tree" -> {
+        try {
+          String treeSha = args[1];
+          String parentSha = null;
+          String message = null;
+          for (int i = 2; i < args.length; i++) {
+            if (args[i].equals("-p") && i + 1 < args.length) {
+              parentSha = args[++i];
+            } else if (args[i].equals("-m") && i + 1 < args.length) {
+              message = args[++i];
+            }
+          }
+
+          StringBuilder content = new StringBuilder();
+          content.append("tree ").append(treeSha).append("\n");
+          if (parentSha != null) {
+            content.append("parent ").append(parentSha).append("\n");
+          }
+          long timestamp = System.currentTimeMillis() / 1000;
+          String authorLine = "author John Doe <john@example.com> " + timestamp + " +0000\n";
+          String committerLine = "committer John Doe <john@example.com> " + timestamp + " +0000\n";
+          content.append(authorLine);
+          content.append(committerLine);
+          content.append("\n");
+          content.append(message != null ? message : "").append("\n");
+
+          byte[] contentBytes = content.toString().getBytes(StandardCharsets.UTF_8);
+          byte[] header = ("commit " + contentBytes.length + "\0").getBytes(StandardCharsets.UTF_8);
+          byte[] fullData = new byte[header.length + contentBytes.length];
+          System.arraycopy(header, 0, fullData, 0, header.length);
+          System.arraycopy(contentBytes, 0, fullData, header.length, contentBytes.length);
+
+          MessageDigest md = MessageDigest.getInstance("SHA-1");
+          byte[] digest = md.digest(fullData);
+          StringBuilder sb = new StringBuilder();
+          for (byte b : digest) {
+            sb.append(String.format("%02x", b));
+          }
+          String commitSha = sb.toString();
+
+          writeObject(commitSha, fullData);
+          System.out.println(commitSha);
+        } catch (Exception e) {
+          throw new RuntimeException(e);
+        }
+      }
       default -> System.out.println("Unknown command: " + command);
     }
   }
@@ -222,7 +267,6 @@ public class Main {
       }
     }
 
-    // Sort entries according to Git's tree ordering
     entries.sort((e1, e2) -> {
       int len1 = e1.name.length();
       int len2 = e2.name.length();
