@@ -130,13 +130,19 @@ public class Main {
                   } else {
                     List<String> elementsToReturn;
                     synchronized (list) {
-                      if (start >= list.size() || start > stop) {
+                      int size = list.size();
+                      if (size == 0) {
                         elementsToReturn = Collections.emptyList();
                       } else {
-                        int stopIdx = Math.min(stop, list.size() - 1);
-                        if (start > stopIdx) {
+                        if (start < 0) start += size;
+                        if (stop < 0) stop += size;
+                        if (start < 0) start = 0;
+                        if (stop < 0) stop = 0;
+
+                        if (start >= size || start > stop) {
                           elementsToReturn = Collections.emptyList();
                         } else {
+                          int stopIdx = Math.min(stop, size - 1);
                           elementsToReturn = new ArrayList<>(list.subList(start, stopIdx + 1));
                         }
                       }
