@@ -800,6 +800,8 @@ public class Main {
           out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
         }
       }
+    } else if (command.equalsIgnoreCase("REPLCONF")) {
+      out.write("+OK\r\n".getBytes(StandardCharsets.UTF_8));
     } else if (command.equalsIgnoreCase("INFO")) {
       String info = getInfoReplication();
       byte[] bytes = info.getBytes(StandardCharsets.UTF_8);
@@ -888,6 +890,23 @@ public class Main {
 
             String response = masterReader.readLine();
             System.out.println("Master response to PING: " + response);
+
+            // Handshake Step 2: Send REPLCONF listening-port <PORT>
+            String portStr = String.valueOf(port);
+            String replconfPort = "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$" + portStr.length() + "\r\n" + portStr + "\r\n";
+            masterOut.write(replconfPort.getBytes(StandardCharsets.UTF_8));
+            masterOut.flush();
+
+            response = masterReader.readLine();
+            System.out.println("Master response to REPLCONF listening-port: " + response);
+
+            // Handshake Step 2 (cont.): Send REPLCONF capa psync2
+            String replconfCapa = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
+            masterOut.write(replconfCapa.getBytes(StandardCharsets.UTF_8));
+            masterOut.flush();
+
+            response = masterReader.readLine();
+            System.out.println("Master response to REPLCONF capa: " + response);
           } catch (IOException e) {
             System.err.println("Replication handshake failed: " + e.getMessage());
           }
