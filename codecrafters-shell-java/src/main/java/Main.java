@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 public class Main {
-    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "complete", "jobs", "history");
+    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "complete", "jobs", "history", "declare");
     private static final Map<String, String> COMPLETION_SPECS = new HashMap<>();
     private static Path currentDir = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
     private static final AtomicInteger nextJobId = new AtomicInteger(1);
@@ -658,6 +658,8 @@ public class Main {
                     }
                 }
             }
+            out.flush();
+        } else if (command.equals("declare")) {
             out.flush();
         } else if (command.equals("jobs")) {
             synchronized (backgroundJobs) {
