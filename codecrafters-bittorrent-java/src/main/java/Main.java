@@ -326,7 +326,7 @@ public class Main {
                 long peerUtMetadataId = (Long) mDict.get("ut_metadata");
 
                 // Send metadata request: msg_type=0, piece=0
-                byte[] reqDict = "d8:msg_typei0e6:piecei0ee".getBytes(StandardCharsets.UTF_8);
+                byte[] reqDict = "d8:msg_typei0e5:piecei0ee".getBytes(StandardCharsets.UTF_8);
                 ByteBuffer metaReqMsg = ByteBuffer.allocate(4 + 1 + 1 + reqDict.length);
                 metaReqMsg.putInt(1 + 1 + reqDict.length);
                 metaReqMsg.put((byte) 20);
