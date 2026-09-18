@@ -85,17 +85,21 @@ public class Main {
 
         // Parse column definitions from CREATE TABLE sql statement
         List<ColumnInfo> columns = parseColumns(targetTable.sql);
-        int targetColIndex = -1;
-        for (int i = 0; i < columns.size(); i++) {
-          if (columns.get(i).name.equalsIgnoreCase(query.column)) {
-            targetColIndex = i;
-            break;
+        List<Integer> targetColIndices = new ArrayList<>();
+        for (String reqCol : query.columns) {
+          int targetColIndex = -1;
+          for (int i = 0; i < columns.size(); i++) {
+            if (columns.get(i).name.equalsIgnoreCase(reqCol)) {
+              targetColIndex = i;
+              break;
+            }
           }
-        }
 
-        if (targetColIndex == -1) {
-          System.out.println("Column not found: " + query.column);
-          return;
+          if (targetColIndex == -1) {
+            System.out.println("Column not found: " + reqCol);
+            return;
+          }
+          targetColIndices.add(targetColIndex);
         }
 
         // Read table root page
@@ -130,24 +134,28 @@ public class Main {
           }
           pageBuffer.position(headerStart + (int) headerSize);
 
-          // 3. Record body: decode requested column
-          String value = null;
-          if (targetColIndex < serialTypes.size()) {
-            for (int col = 0; col < targetColIndex; col++) {
-              long st = serialTypes.get(col);
-              pageBuffer.position(pageBuffer.position() + getSerialTypeSize(st));
-            }
-            long st = serialTypes.get(targetColIndex);
-            boolean isPk = columns.get(targetColIndex).isIntegerPrimaryKey;
-            value = readColumnValue(pageBuffer, st, isPk, rowid);
-          } else {
-            boolean isPk = columns.get(targetColIndex).isIntegerPrimaryKey;
-            if (isPk) {
-              value = String.valueOf(rowid);
+          // 3. Record body: decode all columns in this record
+          int totalCols = Math.max(columns.size(), serialTypes.size());
+          String[] recordValues = new String[totalCols];
+          for (int col = 0; col < serialTypes.size(); col++) {
+            long st = serialTypes.get(col);
+            boolean isPk = (col < columns.size()) && columns.get(col).isIntegerPrimaryKey;
+            recordValues[col] = readColumnValue(pageBuffer, st, isPk, rowid);
+          }
+          for (int col = serialTypes.size(); col < columns.size(); col++) {
+            if (columns.get(col).isIntegerPrimaryKey) {
+              recordValues[col] = String.valueOf(rowid);
             }
           }
 
-          System.out.println(value);
+          // Build row output according to requested columns order
+          List<String> rowValues = new ArrayList<>();
+          for (int colIdx : targetColIndices) {
+            String val = recordValues[colIdx];
+            rowValues.add(val != null ? val : "");
+          }
+
+          System.out.println(String.join("|", rowValues));
         }
       } catch (IOException e) {
         System.out.println("Error reading file: " + e.getMessage());
@@ -158,12 +166,12 @@ public class Main {
   }
 
   static class SelectQuery {
-    String column;
+    List<String> columns;
     String tableName;
     boolean isCount;
 
-    SelectQuery(String column, String tableName, boolean isCount) {
-      this.column = column;
+    SelectQuery(List<String> columns, String tableName, boolean isCount) {
+      this.columns = columns;
       this.tableName = tableName;
       this.isCount = isCount;
     }
@@ -177,11 +185,21 @@ public class Main {
     String selectExpr = matcher.group(1).trim();
     String tableName = matcher.group(2).trim().replaceAll("[\"'\\[\\]`]", "");
     boolean isCount = selectExpr.replaceAll("\\s+", "").equalsIgnoreCase("count(*)");
-    String column = isCount ? null : selectExpr.replaceAll("[\"'\\[\\]`]", "").trim();
-    if (column != null && column.contains(".")) {
-      column = column.substring(column.lastIndexOf('.') + 1);
+    if (isCount) {
+      return new SelectQuery(List.of(), tableName, true);
     }
-    return new SelectQuery(column, tableName, isCount);
+    String[] parts = selectExpr.split(",");
+    List<String> columns = new ArrayList<>();
+    for (String part : parts) {
+      String col = part.replaceAll("[\"'\\[\\]`]", "").trim();
+      if (col.contains(".")) {
+        col = col.substring(col.lastIndexOf('.') + 1).trim();
+      }
+      if (!col.isEmpty()) {
+        columns.add(col);
+      }
+    }
+    return new SelectQuery(columns, tableName, false);
   }
 
   static class ColumnInfo {
