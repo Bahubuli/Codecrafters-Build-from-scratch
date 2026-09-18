@@ -8,6 +8,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 public class Main {
@@ -221,12 +222,9 @@ public class Main {
                 return line.toString();
             } else if (ch == '\t') {
                 String current = line.toString();
-                List<String> candidates = List.of("echo", "exit");
-                List<String> matches = candidates.stream()
-                        .filter(cmd -> cmd.startsWith(current))
-                        .toList();
+                Set<String> matches = getCompletions(current);
                 if (matches.size() == 1) {
-                    String match = matches.get(0);
+                    String match = matches.iterator().next();
                     String completion = match.substring(current.length()) + " ";
                     line.append(completion);
                     System.out.print(completion);
@@ -247,6 +245,43 @@ public class Main {
                 System.out.flush();
             }
         }
+    }
+
+    private static Set<String> getCompletions(String prefix) {
+        Set<String> candidates = new TreeSet<>();
+        for (String builtin : List.of("echo", "exit")) {
+            if (builtin.startsWith(prefix)) {
+                candidates.add(builtin);
+            }
+        }
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv != null && !pathEnv.isEmpty()) {
+            String[] dirs = pathEnv.split(Pattern.quote(File.pathSeparator));
+            for (String dirStr : dirs) {
+                if (dirStr.isEmpty()) {
+                    continue;
+                }
+                File dir = new File(dirStr);
+                if (!dir.exists() || !dir.isDirectory() || !dir.canRead()) {
+                    continue;
+                }
+                File[] files = dir.listFiles();
+                if (files == null) {
+                    continue;
+                }
+                for (File file : files) {
+                    try {
+                        if (file.isFile() && file.canExecute()) {
+                            String name = file.getName();
+                            if (name.startsWith(prefix)) {
+                                candidates.add(name);
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
+        return candidates;
     }
 
     private static void prepareRedirectionFile(String pathStr, boolean append) throws Exception {
