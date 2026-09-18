@@ -92,6 +92,7 @@ public class Main {
         List<String> args = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         boolean inSingleQuote = false;
+        boolean inDoubleQuote = false;
         boolean hasToken = false;
 
         for (int i = 0; i < input.length(); i++) {
@@ -102,9 +103,18 @@ public class Main {
                 } else {
                     current.append(c);
                 }
+            } else if (inDoubleQuote) {
+                if (c == '"') {
+                    inDoubleQuote = false;
+                } else {
+                    current.append(c);
+                }
             } else {
                 if (c == '\'') {
                     inSingleQuote = true;
+                    hasToken = true;
+                } else if (c == '"') {
+                    inDoubleQuote = true;
                     hasToken = true;
                 } else if (Character.isWhitespace(c)) {
                     if (hasToken) {
