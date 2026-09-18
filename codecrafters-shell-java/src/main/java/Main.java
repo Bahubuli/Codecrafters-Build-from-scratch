@@ -8,7 +8,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 public class Main {
-    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type");
+    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd");
+    private static Path currentDir = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
 
     public static void main(String[] args) throws Exception {
         Scanner scanner = new Scanner(System.in);
@@ -52,10 +53,13 @@ public class Main {
                         }
                     }
                 }
+            } else if (command.equals("pwd")) {
+                System.out.println(currentDir);
             } else {
                 Path executable = findExecutable(command);
                 if (executable != null) {
                     ProcessBuilder pb = new ProcessBuilder(parts);
+                    pb.directory(currentDir.toFile());
                     pb.inheritIO();
                     Process process = pb.start();
                     process.waitFor();
@@ -69,7 +73,7 @@ public class Main {
     private static Path findExecutable(String command) {
         if (command.contains("/") || command.contains(File.separator)) {
             try {
-                Path path = Paths.get(command);
+                Path path = currentDir.resolve(command);
                 if (Files.isRegularFile(path) && Files.isExecutable(path)) {
                     return path;
                 }
