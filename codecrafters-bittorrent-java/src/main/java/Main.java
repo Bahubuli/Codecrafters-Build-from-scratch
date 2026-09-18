@@ -26,15 +26,55 @@ public class Main {
   }
 
   static Object decodeBencode(String bencodedString) {
-    if (Character.isDigit(bencodedString.charAt(0))) {
-      int firstColonIndex = bencodedString.indexOf(':');
+    BencodeParser parser = new BencodeParser(bencodedString);
+    return parser.parse();
+  }
+
+  static class BencodeParser {
+    private final String src;
+    private int index = 0;
+
+    public BencodeParser(String src) {
+      this.src = src;
+    }
+
+    public Object parse() {
+      if (index >= src.length()) {
+        throw new RuntimeException("Unexpected end of input");
+      }
+      char ch = src.charAt(index);
+      if (Character.isDigit(ch)) {
+        return parseString();
+      } else if (ch == 'i') {
+        return parseInteger();
+      } else {
+        throw new RuntimeException("Unsupported bencode element starting with: " + ch);
+      }
+    }
+
+    private String parseString() {
+      int firstColonIndex = src.indexOf(':', index);
       if (firstColonIndex == -1) {
         throw new RuntimeException("Invalid bencoded string: missing colon");
       }
-      int length = Integer.parseInt(bencodedString.substring(0, firstColonIndex));
-      return bencodedString.substring(firstColonIndex + 1, firstColonIndex + 1 + length);
-    } else {
-      throw new RuntimeException("Only strings are supported at the moment");
+      int length = Integer.parseInt(src.substring(index, firstColonIndex));
+      int start = firstColonIndex + 1;
+      int end = start + length;
+      if (end > src.length()) {
+        throw new RuntimeException("Unexpected end of bencoded string");
+      }
+      index = end;
+      return src.substring(start, end);
+    }
+
+    private Long parseInteger() {
+      int endIndex = src.indexOf('e', index);
+      if (endIndex == -1) {
+        throw new RuntimeException("Invalid bencoded integer: missing 'e'");
+      }
+      String numStr = src.substring(index + 1, endIndex);
+      index = endIndex + 1;
+      return Long.parseLong(numStr);
     }
   }
 }
