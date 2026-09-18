@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import os
 import shutil
 import sqlite3
@@ -102,13 +102,13 @@ def main():
             resume_btn.click()
             time.sleep(3)
 
-        # Look for "Mark stage as complete" button
-        mark_btn = page.query_selector("button:has-text('Mark stage as complete'), a:has-text('Mark stage as complete')")
+        # Look for "Mark stage as complete" or "Mark as complete" button
+        mark_btn = page.query_selector("button:has-text('Mark stage as complete'), a:has-text('Mark stage as complete'), button:has-text('Mark as complete'), a:has-text('Mark as complete')")
         if mark_btn:
-            print("Found 'Mark stage as complete' button. Clicking...")
+            print("Found 'Mark as complete' button. Clicking...")
             mark_btn.click()
             time.sleep(4)
-            print("Successfully clicked 'Mark stage as complete'!")
+            print("Successfully clicked 'Mark as complete'!")
         else:
             print("No 'Mark stage as complete' button found (stage may already be completed or pending test run).")
 
