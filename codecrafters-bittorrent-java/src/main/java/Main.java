@@ -198,7 +198,7 @@ public class Main {
             break;
           }
         } catch (Exception e) {
-          // Try next peer
+          e.printStackTrace();
         }
       }
 
