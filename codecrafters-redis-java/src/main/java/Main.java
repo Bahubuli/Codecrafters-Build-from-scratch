@@ -123,6 +123,7 @@ public class Main {
   private static String appendFsync = "everysec";
   private static final Object aofLock = new Object();
   private static java.io.File activeAofFile = null;
+  private static volatile boolean isReplayingAof = false;
 
   private static String masterReplId = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
   private static volatile long masterReplOffset = 0;
@@ -137,6 +138,119 @@ public class Main {
       return "role:master\r\nmaster_replid:" + masterReplId + "\r\nmaster_repl_offset:" + masterReplOffset;
     }
     return "role:" + role;
+  }
+
+  private static class ManifestEntry {
+    String filename;
+    long seq;
+    String type;
+    ManifestEntry(String filename, long seq, String type) {
+      this.filename = filename;
+      this.seq = seq;
+      this.type = type;
+    }
+  }
+
+  private static java.util.List<java.io.File> getAofFilesInReplayOrder(java.io.File manifestFile, java.io.File aofDir) {
+    java.util.List<java.io.File> files = new java.util.ArrayList<>();
+    if (manifestFile == null || !manifestFile.exists()) {
+      return files;
+    }
+    java.util.List<ManifestEntry> entries = new java.util.ArrayList<>();
+    try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(manifestFile, StandardCharsets.UTF_8))) {
+      String line;
+      while ((line = br.readLine()) != null) {
+        line = line.trim();
+        if (line.isEmpty() || line.startsWith("#")) continue;
+        String[] tokens = line.split("\\s+");
+        String fname = null;
+        long seq = 0;
+        String type = null;
+        for (int i = 0; i < tokens.length - 1; i++) {
+          if ("file".equalsIgnoreCase(tokens[i])) fname = tokens[i + 1];
+          else if ("seq".equalsIgnoreCase(tokens[i])) {
+            try { seq = Long.parseLong(tokens[i + 1]); } catch (NumberFormatException ignored) {}
+          } else if ("type".equalsIgnoreCase(tokens[i])) type = tokens[i + 1];
+        }
+        if (fname != null) {
+          entries.add(new ManifestEntry(fname, seq, type));
+        }
+      }
+    } catch (java.io.IOException e) {
+      System.err.println("Error reading manifest: " + e.getMessage());
+    }
+
+    entries.sort((e1, e2) -> {
+      boolean b1 = "b".equalsIgnoreCase(e1.type);
+      boolean b2 = "b".equalsIgnoreCase(e2.type);
+      if (b1 && !b2) return -1;
+      if (!b1 && b2) return 1;
+      return Long.compare(e1.seq, e2.seq);
+    });
+
+    for (ManifestEntry entry : entries) {
+      java.io.File f = new java.io.File(aofDir, entry.filename);
+      if (f.exists()) {
+        files.add(f);
+      }
+    }
+    return files;
+  }
+
+  private static void replayAof(java.io.File file) {
+    if (file == null || !file.exists() || file.length() == 0) {
+      return;
+    }
+    isReplayingAof = true;
+    try (java.io.InputStream in = new java.io.BufferedInputStream(new java.io.FileInputStream(file))) {
+      java.io.OutputStream nullOut = java.io.OutputStream.nullOutputStream();
+      while (true) {
+        String line = readLine(in);
+        if (line == null) break;
+        line = line.trim();
+        if (line.isEmpty()) continue;
+
+        if (line.startsWith("*")) {
+          int numArgs = Integer.parseInt(line.substring(1).trim());
+          String[] parts = new String[numArgs];
+          boolean complete = true;
+          for (int i = 0; i < numArgs; i++) {
+            String lenLine = readLine(in);
+            if (lenLine == null) {
+              complete = false;
+              break;
+            }
+            int argLen = Integer.parseInt(lenLine.substring(1).trim());
+            byte[] argBytes = in.readNBytes(argLen);
+            parts[i] = new String(argBytes, StandardCharsets.UTF_8);
+            int cr = in.read();
+            int lf = in.read();
+            if (cr == -1 || lf == -1) {
+              complete = false;
+              break;
+            }
+          }
+          if (complete) {
+            try {
+              handleCommand(parts, nullOut);
+            } catch (Exception e) {
+              System.err.println("Error executing replayed AOF command: " + e.getMessage());
+            }
+          }
+        } else {
+          String[] parts = line.split("\\s+");
+          try {
+            handleCommand(parts, nullOut);
+          } catch (Exception e) {
+            System.err.println("Error executing inline AOF command: " + e.getMessage());
+          }
+        }
+      }
+    } catch (Exception e) {
+      System.err.println("Error replaying AOF file " + file.getName() + ": " + e.getMessage());
+    } finally {
+      isReplayingAof = false;
+    }
   }
 
   private static String getActiveIncrAofFilename(java.io.File manifestFile, String defaultName) {
@@ -172,7 +286,7 @@ public class Main {
   ));
 
   private static void appendToAof(String[] parts) {
-    if (!"yes".equalsIgnoreCase(appendOnly) || activeAofFile == null || parts == null || parts.length == 0) {
+    if (isReplayingAof || !"yes".equalsIgnoreCase(appendOnly) || activeAofFile == null || parts == null || parts.length == 0) {
       return;
     }
     String cmd = parts[0].toUpperCase();
@@ -202,7 +316,7 @@ public class Main {
   }
 
   private static synchronized void propagate(String[] parts) {
-    if (!"master".equalsIgnoreCase(role)) {
+    if (isReplayingAof || !"master".equalsIgnoreCase(role)) {
       return;
     }
     StringBuilder sb = new StringBuilder();
@@ -1506,6 +1620,12 @@ public class Main {
         }
       } catch (java.io.IOException e) {
         System.err.println("Failed to ensure active AOF file: " + e.getMessage());
+      }
+
+      // Replay existing AOF files in manifest order
+      java.util.List<java.io.File> aofFilesToReplay = getAofFilesInReplayOrder(manifestFile, aofDir);
+      for (java.io.File fileToReplay : aofFilesToReplay) {
+        replayAof(fileToReplay);
       }
     }
 
