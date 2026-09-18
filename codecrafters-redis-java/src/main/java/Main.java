@@ -1834,6 +1834,17 @@ public class Main {
                   out.flush();
                   continue;
                 }
+                if (upper.equals("PING")) {
+                  if (parts.length > 1) {
+                    byte[] msgBytes = parts[1].getBytes(StandardCharsets.UTF_8);
+                    String resp = "*2\r\n$4\r\npong\r\n$" + msgBytes.length + "\r\n" + parts[1] + "\r\n";
+                    out.write(resp.getBytes(StandardCharsets.UTF_8));
+                  } else {
+                    out.write("*2\r\n$4\r\npong\r\n$0\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+                  }
+                  out.flush();
+                  continue;
+                }
               }
 
               if (inTx[0]) {
