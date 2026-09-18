@@ -442,9 +442,31 @@ public class Main {
           out.write("-ERR value is not an integer or out of range\r\n".getBytes(StandardCharsets.UTF_8));
         } else {
           touchWatchedKey(key);
+          appendToAof(parts);
           out.write((":" + resultVal[0] + "\r\n").getBytes(StandardCharsets.UTF_8));
         }
         out.flush();
+      }
+    } else if (command.equalsIgnoreCase("DEL")) {
+      if (parts.length < 2) {
+        out.write("-ERR wrong number of arguments for 'del' command\r\n".getBytes(StandardCharsets.UTF_8));
+      } else {
+        int count = 0;
+        for (int i = 1; i < parts.length; i++) {
+          String key = parts[i];
+          boolean removed = false;
+          if (store.remove(key) != null) removed = true;
+          if (listStore.remove(key) != null) removed = true;
+          if (streamStore.remove(key) != null) removed = true;
+          if (removed) {
+            touchWatchedKey(key);
+            count++;
+          }
+        }
+        if (count > 0) {
+          appendToAof(parts);
+        }
+        out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
       }
     } else if (command.equalsIgnoreCase("TYPE")) {
       if (parts.length < 2) {
@@ -794,6 +816,7 @@ public class Main {
           }
           touchWatchedKey(key);
         }
+        appendToAof(parts);
         String response = ":" + newLength + "\r\n";
         out.write(response.getBytes(StandardCharsets.UTF_8));
       }
@@ -828,6 +851,7 @@ public class Main {
           }
           touchWatchedKey(key);
         }
+        appendToAof(parts);
         String response = ":" + newLength + "\r\n";
         out.write(response.getBytes(StandardCharsets.UTF_8));
       }
@@ -867,6 +891,7 @@ public class Main {
           out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
         } else {
           touchWatchedKey(key);
+          appendToAof(parts);
           byte[] bytes = removedElement.getBytes(StandardCharsets.UTF_8);
           String response = "$" + bytes.length + "\r\n" + removedElement + "\r\n";
           out.write(response.getBytes(StandardCharsets.UTF_8));
