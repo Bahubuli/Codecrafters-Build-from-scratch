@@ -1,7 +1,9 @@
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Scanner;
 import java.util.Set;
 
@@ -93,89 +95,147 @@ public class Main {
         ZERO_OR_ONE
     }
 
-    static class PatternElement {
+    interface PatternNode {}
+
+    static class TokenNode implements PatternNode {
         final Token token;
         final Quantifier quantifier;
 
-        PatternElement(Token token, Quantifier quantifier) {
+        TokenNode(Token token, Quantifier quantifier) {
             this.token = token;
             this.quantifier = quantifier;
         }
     }
 
-    static List<PatternElement> parsePatternElements(String pattern) {
-        List<Token> rawTokens = new ArrayList<>();
-        List<Quantifier> quantifiers = new ArrayList<>();
+    static class GroupNode implements PatternNode {
+        final int groupId;
+        final List<List<PatternNode>> alternatives;
+        final Quantifier quantifier;
 
-        int i = 0;
-        while (i < pattern.length()) {
-            char c = pattern.charAt(i);
-            Token currentToken = null;
+        GroupNode(int groupId, List<List<PatternNode>> alternatives, Quantifier quantifier) {
+            this.groupId = groupId;
+            this.alternatives = alternatives;
+            this.quantifier = quantifier;
+        }
+    }
 
-            if (c == '\\') {
-                if (i + 1 < pattern.length()) {
-                    char next = pattern.charAt(i + 1);
-                    if (next == 'd') {
-                        currentToken = new DigitToken();
-                        i += 2;
-                    } else if (next == 'w') {
-                        currentToken = new WordToken();
-                        i += 2;
-                    } else if (next == '\\') {
-                        currentToken = new LiteralToken('\\');
-                        i += 2;
-                    } else {
-                        currentToken = new LiteralToken(next);
-                        i += 2;
-                    }
-                } else {
-                    currentToken = new LiteralToken('\\');
-                    i++;
-                }
-            } else if (c == '.') {
-                currentToken = new WildcardToken();
-                i++;
-            } else if (c == '[') {
-                int closing = pattern.indexOf(']', i + 1);
-                if (closing != -1) {
-                    if (i + 1 < pattern.length() && pattern.charAt(i + 1) == '^') {
-                        String groupChars = pattern.substring(i + 2, closing);
-                        currentToken = new NegativeGroupToken(groupChars);
-                    } else {
-                        String groupChars = pattern.substring(i + 1, closing);
-                        currentToken = new PositiveGroupToken(groupChars);
-                    }
-                    i = closing + 1;
-                } else {
-                    currentToken = new LiteralToken(c);
-                    i++;
-                }
-            } else {
-                currentToken = new LiteralToken(c);
-                i++;
-            }
+    static class BackreferenceNode implements PatternNode {
+        final int groupNum;
 
-            Quantifier q = Quantifier.EXACTLY_ONE;
-            if (i < pattern.length()) {
-                char nextChar = pattern.charAt(i);
-                if (nextChar == '+') {
-                    q = Quantifier.ONE_OR_MORE;
-                    i++;
-                } else if (nextChar == '?') {
-                    q = Quantifier.ZERO_OR_ONE;
-                    i++;
-                }
-            }
+        BackreferenceNode(int groupNum) {
+            this.groupNum = groupNum;
+        }
+    }
 
-            rawTokens.add(currentToken);
-            quantifiers.add(q);
+    static class Parser {
+        private final String pattern;
+        private int pos = 0;
+        private int nextGroupId = 1;
+
+        Parser(String pattern) {
+            this.pattern = pattern;
         }
 
-        List<PatternElement> elements = new ArrayList<>();
-        for (int j = 0; j < rawTokens.size(); j++) {
-            elements.add(new PatternElement(rawTokens.get(j), quantifiers.get(j)));
+        List<PatternNode> parse() {
+            return parseSequence(-1);
         }
-        return elements;
+
+        private List<PatternNode> parseSequence(int stopChar) {
+            List<PatternNode> nodes = new ArrayList<>();
+            while (pos < pattern.length()) {
+                char c = pattern.charAt(pos);
+                if (stopChar != -1 && (c == stopChar || c == '|')) {
+                    break;
+                }
+
+                if (c == '(') {
+                    pos++; // consume '('
+                    int currentGroupId = nextGroupId++;
+                    List<List<PatternNode>> alternatives = new ArrayList<>();
+
+                    while (pos < pattern.length() && pattern.charAt(pos) != ')') {
+                        List<PatternNode> altNodes = parseSequence(')');
+                        alternatives.add(altNodes);
+                        if (pos < pattern.length() && pattern.charAt(pos) == '|') {
+                            pos++; // consume '|'
+                        }
+                    }
+                    if (pos < pattern.length() && pattern.charAt(pos) == ')') {
+                        pos++; // consume ')'
+                    }
+
+                    Quantifier q = parseQuantifier();
+                    nodes.add(new GroupNode(currentGroupId, alternatives, q));
+                } else if (c == '\\') {
+                    if (pos + 1 < pattern.length()) {
+                        char next = pattern.charAt(pos + 1);
+                        if (Character.isDigit(next) && next != '0') {
+                            int groupNum = next - '0';
+                            pos += 2;
+                            nodes.add(new BackreferenceNode(groupNum));
+                        } else if (next == 'd') {
+                            pos += 2;
+                            Quantifier q = parseQuantifier();
+                            nodes.add(new TokenNode(new DigitToken(), q));
+                        } else if (next == 'w') {
+                            pos += 2;
+                            Quantifier q = parseQuantifier();
+                            nodes.add(new TokenNode(new WordToken(), q));
+                        } else {
+                            pos += 2;
+                            Quantifier q = parseQuantifier();
+                            nodes.add(new TokenNode(new LiteralToken(next), q));
+                        }
+                    } else {
+                        pos++;
+                        Quantifier q = parseQuantifier();
+                        nodes.add(new TokenNode(new LiteralToken('\\'), q));
+                    }
+                } else if (c == '.') {
+                    pos++;
+                    Quantifier q = parseQuantifier();
+                    nodes.add(new TokenNode(new WildcardToken(), q));
+                } else if (c == '[') {
+                    int closing = pattern.indexOf(']', pos + 1);
+                    if (closing != -1) {
+                        Token token;
+                        if (pos + 1 < pattern.length() && pattern.charAt(pos + 1) == '^') {
+                            String groupChars = pattern.substring(pos + 2, closing);
+                            token = new NegativeGroupToken(groupChars);
+                        } else {
+                            String groupChars = pattern.substring(pos + 1, closing);
+                            token = new PositiveGroupToken(groupChars);
+                        }
+                        pos = closing + 1;
+                        Quantifier q = parseQuantifier();
+                        nodes.add(new TokenNode(token, q));
+                    } else {
+                        pos++;
+                        Quantifier q = parseQuantifier();
+                        nodes.add(new TokenNode(new LiteralToken(c), q));
+                    }
+                } else {
+                    pos++;
+                    Quantifier q = parseQuantifier();
+                    nodes.add(new TokenNode(new LiteralToken(c), q));
+                }
+            }
+            return nodes;
+        }
+
+        private Quantifier parseQuantifier() {
+            if (pos < pattern.length()) {
+                char c = pattern.charAt(pos);
+                if (c == '+') {
+                    pos++;
+                    return Quantifier.ONE_OR_MORE;
+                } else if (c == '?') {
+                    pos++;
+                    return Quantifier.ZERO_OR_ONE;
+                }
+            }
+            return Quantifier.EXACTLY_ONE;
+        }
     }
 
     public static boolean matchPattern(String inputLine, String pattern) {
@@ -192,61 +252,137 @@ public class Main {
             activePattern = activePattern.substring(0, activePattern.length() - 1);
         }
 
-        List<PatternElement> elements = parsePatternElements(activePattern);
+        Parser parser = new Parser(activePattern);
+        List<PatternNode> nodes = parser.parse();
 
-        if (elements.isEmpty()) {
+        if (nodes.isEmpty()) {
             return !anchorEnd || inputLine.isEmpty();
         }
 
         if (anchorStart) {
-            return matchesAt(inputLine, 0, elements, 0, anchorEnd);
+            return matchesNodesAt(inputLine, 0, nodes, 0, anchorEnd, new HashMap<>());
         }
 
         for (int start = 0; start <= inputLine.length(); start++) {
-            if (matchesAt(inputLine, start, elements, 0, anchorEnd)) {
+            if (matchesNodesAt(inputLine, start, nodes, 0, anchorEnd, new HashMap<>())) {
                 return true;
             }
         }
         return false;
     }
 
-    private static boolean matchesAt(String inputLine, int textIdx, List<PatternElement> elements, int elemIdx, boolean anchorEnd) {
-        if (elemIdx == elements.size()) {
+    private static boolean matchesNodesAt(
+        String inputLine,
+        int textIdx,
+        List<PatternNode> nodes,
+        int nodeIdx,
+        boolean anchorEnd,
+        Map<Integer, String> capturedGroups
+    ) {
+        if (nodeIdx == nodes.size()) {
             if (anchorEnd) {
                 return textIdx == inputLine.length();
             }
             return true;
         }
 
-        PatternElement current = elements.get(elemIdx);
+        PatternNode current = nodes.get(nodeIdx);
 
-        if (current.quantifier == Quantifier.EXACTLY_ONE) {
-            if (textIdx < inputLine.length() && current.token.matches(inputLine.charAt(textIdx))) {
-                return matchesAt(inputLine, textIdx + 1, elements, elemIdx + 1, anchorEnd);
+        if (current instanceof TokenNode) {
+            TokenNode tn = (TokenNode) current;
+            if (tn.quantifier == Quantifier.EXACTLY_ONE) {
+                if (textIdx < inputLine.length() && tn.token.matches(inputLine.charAt(textIdx))) {
+                    return matchesNodesAt(inputLine, textIdx + 1, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+                }
+                return false;
+            } else if (tn.quantifier == Quantifier.ONE_OR_MORE) {
+                if (textIdx >= inputLine.length() || !tn.token.matches(inputLine.charAt(textIdx))) {
+                    return false;
+                }
+                int maxMatch = textIdx;
+                while (maxMatch < inputLine.length() && tn.token.matches(inputLine.charAt(maxMatch))) {
+                    maxMatch++;
+                }
+                for (int end = maxMatch; end >= textIdx + 1; end--) {
+                    if (matchesNodesAt(inputLine, end, nodes, nodeIdx + 1, anchorEnd, capturedGroups)) {
+                        return true;
+                    }
+                }
+                return false;
+            } else if (tn.quantifier == Quantifier.ZERO_OR_ONE) {
+                if (textIdx < inputLine.length() && tn.token.matches(inputLine.charAt(textIdx))) {
+                    if (matchesNodesAt(inputLine, textIdx + 1, nodes, nodeIdx + 1, anchorEnd, capturedGroups)) {
+                        return true;
+                    }
+                }
+                return matchesNodesAt(inputLine, textIdx, nodes, nodeIdx + 1, anchorEnd, capturedGroups);
+            }
+        } else if (current instanceof GroupNode) {
+            GroupNode gn = (GroupNode) current;
+            for (List<PatternNode> branch : gn.alternatives) {
+                List<Integer> endPositions = new ArrayList<>();
+                findBranchMatches(inputLine, textIdx, branch, 0, capturedGroups, endPositions);
+                for (int endPos : endPositions) {
+                    String captured = inputLine.substring(textIdx, endPos);
+                    Map<Integer, String> newCaptured = new HashMap<>(capturedGroups);
+                    newCaptured.put(gn.groupId, captured);
+                    if (matchesNodesAt(inputLine, endPos, nodes, nodeIdx + 1, anchorEnd, newCaptured)) {
+                        return true;
+                    }
+                }
             }
             return false;
-        } else if (current.quantifier == Quantifier.ONE_OR_MORE) {
-            if (textIdx >= inputLine.length() || !current.token.matches(inputLine.charAt(textIdx))) {
+        } else if (current instanceof BackreferenceNode) {
+            BackreferenceNode bn = (BackreferenceNode) current;
+            String captured = capturedGroups.get(bn.groupNum);
+            if (captured == null) {
                 return false;
             }
-            int maxMatch = textIdx;
-            while (maxMatch < inputLine.length() && current.token.matches(inputLine.charAt(maxMatch))) {
-                maxMatch++;
-            }
-            for (int end = maxMatch; end >= textIdx + 1; end--) {
-                if (matchesAt(inputLine, end, elements, elemIdx + 1, anchorEnd)) {
-                    return true;
-                }
+            if (inputLine.startsWith(captured, textIdx)) {
+                return matchesNodesAt(inputLine, textIdx + captured.length(), nodes, nodeIdx + 1, anchorEnd, capturedGroups);
             }
             return false;
-        } else if (current.quantifier == Quantifier.ZERO_OR_ONE) {
-            if (textIdx < inputLine.length() && current.token.matches(inputLine.charAt(textIdx))) {
-                if (matchesAt(inputLine, textIdx + 1, elements, elemIdx + 1, anchorEnd)) {
-                    return true;
-                }
-            }
-            return matchesAt(inputLine, textIdx, elements, elemIdx + 1, anchorEnd);
         }
         return false;
+    }
+
+    private static void findBranchMatches(
+        String inputLine,
+        int textIdx,
+        List<PatternNode> branchNodes,
+        int bIdx,
+        Map<Integer, String> capturedGroups,
+        List<Integer> endPositions
+    ) {
+        if (bIdx == branchNodes.size()) {
+            endPositions.add(textIdx);
+            return;
+        }
+
+        PatternNode current = branchNodes.get(bIdx);
+        if (current instanceof TokenNode) {
+            TokenNode tn = (TokenNode) current;
+            if (tn.quantifier == Quantifier.EXACTLY_ONE) {
+                if (textIdx < inputLine.length() && tn.token.matches(inputLine.charAt(textIdx))) {
+                    findBranchMatches(inputLine, textIdx + 1, branchNodes, bIdx + 1, capturedGroups, endPositions);
+                }
+            } else if (tn.quantifier == Quantifier.ONE_OR_MORE) {
+                if (textIdx >= inputLine.length() || !tn.token.matches(inputLine.charAt(textIdx))) {
+                    return;
+                }
+                int maxMatch = textIdx;
+                while (maxMatch < inputLine.length() && tn.token.matches(inputLine.charAt(maxMatch))) {
+                    maxMatch++;
+                }
+                for (int end = maxMatch; end >= textIdx + 1; end--) {
+                    findBranchMatches(inputLine, end, branchNodes, bIdx + 1, capturedGroups, endPositions);
+                }
+            } else if (tn.quantifier == Quantifier.ZERO_OR_ONE) {
+                if (textIdx < inputLine.length() && tn.token.matches(inputLine.charAt(textIdx))) {
+                    findBranchMatches(inputLine, textIdx + 1, branchNodes, bIdx + 1, capturedGroups, endPositions);
+                }
+                findBranchMatches(inputLine, textIdx, branchNodes, bIdx + 1, capturedGroups, endPositions);
+            }
+        }
     }
 }
