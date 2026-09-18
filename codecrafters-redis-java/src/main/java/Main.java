@@ -281,7 +281,15 @@ public class Main {
   }
 
   private static boolean matchesPattern(String pattern, String key) {
-    if (pattern.equals("*")) return true;
+    if (pattern == null || pattern.equals("*")) return true;
+    if (pattern.startsWith("*") && pattern.endsWith("*") && pattern.length() > 2) {
+      String sub = pattern.substring(1, pattern.length() - 1);
+      return key.contains(sub);
+    }
+    if (pattern.startsWith("*")) {
+      String suffix = pattern.substring(1);
+      return key.endsWith(suffix);
+    }
     if (pattern.endsWith("*")) {
       String prefix = pattern.substring(0, pattern.length() - 1);
       return key.startsWith(prefix);
@@ -1068,14 +1076,14 @@ public class Main {
         out.flush();
       }
     } else if (command.equalsIgnoreCase("KEYS")) {
-      // Stage 69: KEYS * returns all non-expired keys from the store
-      String pattern = parts.length > 1 ? parts[1] : "*";
+      // Stage 71: KEYS * returns all non-expired keys from the store
+      String pattern = parts.length > 1 ? stripQuotes(parts[1]) : "*";
       List<String> keys = new ArrayList<>();
       for (Map.Entry<String, Entry> e : store.entrySet()) {
-        if (!e.getValue().isExpired()) {
-          if (matchesPattern(pattern, e.getKey())) {
-            keys.add(e.getKey());
-          }
+        if (e.getValue().isExpired()) {
+          store.remove(e.getKey());
+        } else if (matchesPattern(pattern, e.getKey())) {
+          keys.add(e.getKey());
         }
       }
       StringBuilder sb = new StringBuilder();
@@ -1316,7 +1324,7 @@ public class Main {
       }
     }
 
-    // Stage 70: Load RDB file at startup
+    // Stage 71: Load RDB file at startup
     loadRdb();
 
     try {
