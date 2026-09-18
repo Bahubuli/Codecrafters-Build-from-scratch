@@ -19,11 +19,43 @@ public class Main {
         }
     }
 
+    interface Token {
+        boolean matches(char c);
+    }
+
+    static class LiteralToken implements Token {
+        private final char ch;
+        public LiteralToken(char ch) {
+            this.ch = ch;
+        }
+        @Override
+        public boolean matches(char c) {
+            return this.ch == c;
+        }
+    }
+
+    static class DigitToken implements Token {
+        @Override
+        public boolean matches(char c) {
+            return Character.isDigit(c);
+        }
+    }
+
     public static boolean matchPattern(String inputLine, String pattern) {
-        if (pattern.length() == 1) {
-            return inputLine.contains(pattern);
+        Token token;
+        if (pattern.equals("\\d")) {
+            token = new DigitToken();
+        } else if (pattern.length() == 1) {
+            token = new LiteralToken(pattern.charAt(0));
         } else {
             throw new RuntimeException("Unhandled pattern: " + pattern);
         }
+
+        for (int i = 0; i < inputLine.length(); i++) {
+            if (token.matches(inputLine.charAt(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 }
