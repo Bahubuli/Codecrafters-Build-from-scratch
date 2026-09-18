@@ -50,9 +50,9 @@ public class Main {
       }
     } else if (trimmedCommand.toUpperCase().startsWith("SELECT")) {
       try (RandomAccessFile databaseFile = new RandomAccessFile(new File(databaseFilePath), "r")) {
-        String tableName = extractTableName(trimmedCommand);
-        if (tableName == null || tableName.isEmpty()) {
-          System.out.println("Invalid SQL query: could not extract table name");
+        SelectQuery query = parseSelectQuery(trimmedCommand);
+        if (query == null) {
+          System.out.println("Invalid SQL query: " + trimmedCommand);
           return;
         }
 
@@ -61,14 +61,14 @@ public class Main {
 
         SchemaRow targetTable = null;
         for (SchemaRow row : schema) {
-          if ("table".equalsIgnoreCase(row.type) && row.tblName != null && row.tblName.equalsIgnoreCase(tableName)) {
+          if ("table".equalsIgnoreCase(row.type) && row.tblName != null && row.tblName.equalsIgnoreCase(query.tableName)) {
             targetTable = row;
             break;
           }
         }
 
         if (targetTable == null) {
-          System.out.println("Table not found: " + tableName);
+          System.out.println("Table not found: " + query.tableName);
           return;
         }
 
@@ -76,10 +76,79 @@ public class Main {
         long pageOffset = (long) (rootpage - 1) * pageSize;
         int btreeHeaderOffset = (rootpage == 1) ? 100 : 0;
 
-        databaseFile.seek(pageOffset + btreeHeaderOffset + 3);
-        int rowCount = databaseFile.readUnsignedShort();
+        if (query.isCount) {
+          databaseFile.seek(pageOffset + btreeHeaderOffset + 3);
+          int rowCount = databaseFile.readUnsignedShort();
+          System.out.println(rowCount);
+          return;
+        }
 
-        System.out.println(rowCount);
+        // Parse column definitions from CREATE TABLE sql statement
+        List<ColumnInfo> columns = parseColumns(targetTable.sql);
+        int targetColIndex = -1;
+        for (int i = 0; i < columns.size(); i++) {
+          if (columns.get(i).name.equalsIgnoreCase(query.column)) {
+            targetColIndex = i;
+            break;
+          }
+        }
+
+        if (targetColIndex == -1) {
+          System.out.println("Column not found: " + query.column);
+          return;
+        }
+
+        // Read table root page
+        byte[] pageData = new byte[pageSize];
+        databaseFile.seek(pageOffset);
+        databaseFile.readFully(pageData);
+        ByteBuffer pageBuffer = ByteBuffer.wrap(pageData);
+
+        int cellCount = Short.toUnsignedInt(pageBuffer.getShort(btreeHeaderOffset + 3));
+        int cellPointerArrayOffset = btreeHeaderOffset + 8;
+
+        for (int i = 0; i < cellCount; i++) {
+          int cellOffset = Short.toUnsignedInt(pageBuffer.getShort(cellPointerArrayOffset + i * 2));
+          pageBuffer.position(cellOffset);
+
+          // Table leaf cell:
+          // 1. payload size (varint)
+          // 2. rowid (varint)
+          // 3. payload (record format)
+          readVarint(pageBuffer);
+          long rowid = readVarint(pageBuffer);
+
+          // Record format:
+          // 1. Header size (varint)
+          int headerStart = pageBuffer.position();
+          long headerSize = readVarint(pageBuffer);
+
+          // 2. Column serial types (varints)
+          List<Long> serialTypes = new ArrayList<>();
+          while (pageBuffer.position() - headerStart < headerSize) {
+            serialTypes.add(readVarint(pageBuffer));
+          }
+          pageBuffer.position(headerStart + (int) headerSize);
+
+          // 3. Record body: decode requested column
+          String value = null;
+          if (targetColIndex < serialTypes.size()) {
+            for (int col = 0; col < targetColIndex; col++) {
+              long st = serialTypes.get(col);
+              pageBuffer.position(pageBuffer.position() + getSerialTypeSize(st));
+            }
+            long st = serialTypes.get(targetColIndex);
+            boolean isPk = columns.get(targetColIndex).isIntegerPrimaryKey;
+            value = readColumnValue(pageBuffer, st, isPk, rowid);
+          } else {
+            boolean isPk = columns.get(targetColIndex).isIntegerPrimaryKey;
+            if (isPk) {
+              value = String.valueOf(rowid);
+            }
+          }
+
+          System.out.println(value);
+        }
       } catch (IOException e) {
         System.out.println("Error reading file: " + e.getMessage());
       }
@@ -88,13 +157,135 @@ public class Main {
     }
   }
 
-  static String extractTableName(String sql) {
-    Matcher matcher = Pattern.compile("(?i)^select\\s+count\\s*\\(.*\\)\\s+from\\s+(\\S+)", Pattern.CASE_INSENSITIVE).matcher(sql);
-    if (matcher.find()) {
-      return matcher.group(1).replaceAll("[;\"'`]", "");
+  static class SelectQuery {
+    String column;
+    String tableName;
+    boolean isCount;
+
+    SelectQuery(String column, String tableName, boolean isCount) {
+      this.column = column;
+      this.tableName = tableName;
+      this.isCount = isCount;
     }
-    String[] parts = sql.split("\\s+");
-    return parts[parts.length - 1].replaceAll("[;\"'`]", "");
+  }
+
+  static SelectQuery parseSelectQuery(String sql) {
+    Matcher matcher = Pattern.compile("(?is)^SELECT\\s+(.+?)\\s+FROM\\s+([^;\\s]+)\\s*;?$").matcher(sql.trim());
+    if (!matcher.find()) {
+      return null;
+    }
+    String selectExpr = matcher.group(1).trim();
+    String tableName = matcher.group(2).trim().replaceAll("[\"'\\[\\]`]", "");
+    boolean isCount = selectExpr.replaceAll("\\s+", "").equalsIgnoreCase("count(*)");
+    String column = isCount ? null : selectExpr.replaceAll("[\"'\\[\\]`]", "").trim();
+    if (column != null && column.contains(".")) {
+      column = column.substring(column.lastIndexOf('.') + 1);
+    }
+    return new SelectQuery(column, tableName, isCount);
+  }
+
+  static class ColumnInfo {
+    String name;
+    boolean isIntegerPrimaryKey;
+
+    ColumnInfo(String name, boolean isIntegerPrimaryKey) {
+      this.name = name;
+      this.isIntegerPrimaryKey = isIntegerPrimaryKey;
+    }
+  }
+
+  static List<ColumnInfo> parseColumns(String createTableSql) {
+    List<ColumnInfo> columns = new ArrayList<>();
+    if (createTableSql == null) return columns;
+
+    int firstParen = createTableSql.indexOf('(');
+    int lastParen = createTableSql.lastIndexOf(')');
+    if (firstParen == -1 || lastParen == -1 || firstParen >= lastParen) {
+      return columns;
+    }
+
+    String inside = createTableSql.substring(firstParen + 1, lastParen);
+    List<String> colDefs = new ArrayList<>();
+    int depth = 0;
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < inside.length(); i++) {
+      char c = inside.charAt(i);
+      if (c == '(') depth++;
+      else if (c == ')') depth--;
+      if (c == ',' && depth == 0) {
+        colDefs.add(sb.toString().trim());
+        sb.setLength(0);
+      } else {
+        sb.append(c);
+      }
+    }
+    if (sb.length() > 0) {
+      colDefs.add(sb.toString().trim());
+    }
+
+    for (String def : colDefs) {
+      String trimmed = def.trim();
+      if (trimmed.isEmpty()) continue;
+
+      String colName;
+      String rest;
+      if (trimmed.startsWith("\"")) {
+        int close = trimmed.indexOf('"', 1);
+        if (close != -1) {
+          colName = trimmed.substring(1, close);
+          rest = trimmed.substring(close + 1).trim();
+        } else {
+          colName = trimmed;
+          rest = "";
+        }
+      } else if (trimmed.startsWith("[")) {
+        int close = trimmed.indexOf(']', 1);
+        if (close != -1) {
+          colName = trimmed.substring(1, close);
+          rest = trimmed.substring(close + 1).trim();
+        } else {
+          colName = trimmed;
+          rest = "";
+        }
+      } else if (trimmed.startsWith("`")) {
+        int close = trimmed.indexOf('`', 1);
+        if (close != -1) {
+          colName = trimmed.substring(1, close);
+          rest = trimmed.substring(close + 1).trim();
+        } else {
+          colName = trimmed;
+          rest = "";
+        }
+      } else if (trimmed.startsWith("'")) {
+        int close = trimmed.indexOf('\'', 1);
+        if (close != -1) {
+          colName = trimmed.substring(1, close);
+          rest = trimmed.substring(close + 1).trim();
+        } else {
+          colName = trimmed;
+          rest = "";
+        }
+      } else {
+        String[] parts = trimmed.split("\\s+", 2);
+        colName = parts[0];
+        rest = parts.length > 1 ? parts[1].trim() : "";
+      }
+
+      colName = colName.replaceAll("[\"'\\[\\]`]", "").trim();
+
+      String upperCol = colName.toUpperCase();
+      String upperRest = rest.toUpperCase();
+      if (upperCol.equals("CONSTRAINT")) continue;
+      if (upperCol.equals("PRIMARY") && upperRest.startsWith("KEY")) continue;
+      if (upperCol.equals("FOREIGN") && upperRest.startsWith("KEY")) continue;
+      if (upperCol.equals("CHECK") && upperRest.startsWith("(")) continue;
+      if (upperCol.equals("UNIQUE") && upperRest.startsWith("(")) continue;
+
+      boolean isPk = Pattern.compile("(?i)\\binteger\\s+primary\\s+key\\b").matcher(trimmed).find();
+      columns.add(new ColumnInfo(colName, isPk));
+    }
+
+    return columns;
   }
 
   static int readPageSize(RandomAccessFile databaseFile) throws IOException {
@@ -227,6 +418,61 @@ public class Main {
       case 9 -> 1L;
       default -> 0L;
     };
+  }
+
+  static String readColumnValue(ByteBuffer buffer, long serialType, boolean isIntegerPrimaryKey, long rowid) {
+    if (serialType == 0) {
+      return isIntegerPrimaryKey ? String.valueOf(rowid) : null;
+    }
+    if (serialType == 1) {
+      return String.valueOf((long) buffer.get());
+    }
+    if (serialType == 2) {
+      return String.valueOf((long) buffer.getShort());
+    }
+    if (serialType == 3) {
+      int b0 = buffer.get();
+      int b1 = buffer.get() & 0xFF;
+      int b2 = buffer.get() & 0xFF;
+      return String.valueOf((long) ((b0 << 16) | (b1 << 8) | b2));
+    }
+    if (serialType == 4) {
+      return String.valueOf((long) buffer.getInt());
+    }
+    if (serialType == 5) {
+      long b0 = buffer.get();
+      long b1 = buffer.get() & 0xFFL;
+      long b2 = buffer.get() & 0xFFL;
+      long b3 = buffer.get() & 0xFFL;
+      long b4 = buffer.get() & 0xFFL;
+      long b5 = buffer.get() & 0xFFL;
+      return String.valueOf((b0 << 40) | (b1 << 32) | (b2 << 24) | (b3 << 16) | (b4 << 8) | b5);
+    }
+    if (serialType == 6) {
+      return String.valueOf(buffer.getLong());
+    }
+    if (serialType == 7) {
+      return String.valueOf(buffer.getDouble());
+    }
+    if (serialType == 8) {
+      return "0";
+    }
+    if (serialType == 9) {
+      return "1";
+    }
+    if (serialType >= 12 && serialType % 2 == 0) {
+      int size = (int) ((serialType - 12) / 2);
+      byte[] bytes = new byte[size];
+      buffer.get(bytes);
+      return new String(bytes, StandardCharsets.UTF_8);
+    }
+    if (serialType >= 13 && serialType % 2 != 0) {
+      int size = (int) ((serialType - 13) / 2);
+      byte[] bytes = new byte[size];
+      buffer.get(bytes);
+      return new String(bytes, StandardCharsets.UTF_8);
+    }
+    return null;
   }
 
   static long readVarint(ByteBuffer buffer) {

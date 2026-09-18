@@ -45,9 +45,18 @@ public class Main {
       byte[] infoHashBytes = md.digest(rawInfoBytes);
       String infoHash = bytesToHex(infoHashBytes);
 
+      long pieceLength = (Long) info.get("piece length");
+      byte[] pieces = (byte[]) info.get("pieces");
+
       System.out.println("Tracker URL: " + announce);
       System.out.println("Length: " + length);
       System.out.println("Info Hash: " + infoHash);
+      System.out.println("Piece Length: " + pieceLength);
+      System.out.println("Piece Hashes:");
+      for (int i = 0; i < pieces.length; i += 20) {
+        byte[] pieceHash = Arrays.copyOfRange(pieces, i, i + 20);
+        System.out.println(bytesToHex(pieceHash));
+      }
     } else {
       System.out.println("Unknown command: " + command);
     }
