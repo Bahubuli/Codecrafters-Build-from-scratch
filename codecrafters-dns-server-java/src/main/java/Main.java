@@ -13,7 +13,7 @@ public class Main {
                 serverSocket.receive(packet);
                 System.out.println("Received packet from " + packet.getSocketAddress());
 
-                // Stage 3: Construct DNS response with Question section
+                // Stage 4: Construct DNS response with Question and Answer sections
                 DnsHeader responseHeader = new DnsHeader(
                         1234,   // ID: 1234
                         true,   // QR: 1 (Response)
@@ -25,13 +25,14 @@ public class Main {
                         0,      // Z: 0 (Reserved)
                         0,      // RCODE: 0 (No error)
                         1,      // QDCOUNT: 1
-                        0,      // ANCOUNT: 0
+                        1,      // ANCOUNT: 1
                         0,      // NSCOUNT: 0
                         0       // ARCOUNT: 0
                 );
 
                 DnsMessage responseMessage = new DnsMessage(responseHeader);
                 responseMessage.addQuestion(new DnsQuestion("codecrafters.io", 1, 1));
+                responseMessage.addAnswer(new DnsRecord("codecrafters.io", 1, 1, 60, new byte[] {8, 8, 8, 8}));
                 byte[] responseBytes = responseMessage.toBytes();
 
                 final DatagramPacket packetResponse = new DatagramPacket(

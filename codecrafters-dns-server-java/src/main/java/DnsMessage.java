@@ -5,6 +5,7 @@ import java.util.List;
 public class DnsMessage {
     private DnsHeader header;
     private List<DnsQuestion> questions = new ArrayList<>();
+    private List<DnsRecord> answers = new ArrayList<>();
 
     public DnsMessage() {
     }
@@ -20,6 +21,16 @@ public class DnsMessage {
         }
     }
 
+    public DnsMessage(DnsHeader header, List<DnsQuestion> questions, List<DnsRecord> answers) {
+        this.header = header;
+        if (questions != null) {
+            this.questions = new ArrayList<>(questions);
+        }
+        if (answers != null) {
+            this.answers = new ArrayList<>(answers);
+        }
+    }
+
     public static DnsMessage parse(byte[] data) {
         ByteBuffer buffer = ByteBuffer.wrap(data);
         DnsHeader header = DnsHeader.parse(buffer);
@@ -29,6 +40,10 @@ public class DnsMessage {
             message.addQuestion(DnsQuestion.parse(buffer));
         }
 
+        for (int i = 0; i < header.getAnCount(); i++) {
+            message.addAnswer(DnsRecord.parse(buffer));
+        }
+
         return message;
     }
 
@@ -36,11 +51,17 @@ public class DnsMessage {
         ByteBuffer buffer = ByteBuffer.allocate(512);
         if (header != null) {
             header.setQdCount(questions != null ? questions.size() : 0);
+            header.setAnCount(answers != null ? answers.size() : 0);
             header.write(buffer);
         }
         if (questions != null) {
             for (DnsQuestion question : questions) {
                 question.write(buffer);
+            }
+        }
+        if (answers != null) {
+            for (DnsRecord answer : answers) {
+                answer.write(buffer);
             }
         }
         buffer.flip();
@@ -68,6 +89,20 @@ public class DnsMessage {
     public void addQuestion(DnsQuestion question) {
         if (question != null) {
             this.questions.add(question);
+        }
+    }
+
+    public List<DnsRecord> getAnswers() {
+        return answers;
+    }
+
+    public void setAnswers(List<DnsRecord> answers) {
+        this.answers = (answers != null) ? new ArrayList<>(answers) : new ArrayList<>();
+    }
+
+    public void addAnswer(DnsRecord answer) {
+        if (answer != null) {
+            this.answers.add(answer);
         }
     }
 }
