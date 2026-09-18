@@ -810,8 +810,29 @@ public class Main {
         out.write("-ERR wrong number of arguments for 'geoadd' command\r\n".getBytes(StandardCharsets.UTF_8));
         out.flush();
       } else {
-        int count = (parts.length - 2) / 3;
-        out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
+        boolean valid = true;
+        String errorMsg = null;
+        for (int i = 2; i < parts.length; i += 3) {
+          try {
+            double lon = Double.parseDouble(parts[i]);
+            double lat = Double.parseDouble(parts[i + 1]);
+            if (lon < -180.0 || lon > 180.0 || lat < -85.05112878 || lat > 85.05112878) {
+              valid = false;
+              errorMsg = "-ERR invalid longitude,latitude pair " + parts[i] + "," + parts[i + 1] + "\r\n";
+              break;
+            }
+          } catch (NumberFormatException e) {
+            valid = false;
+            errorMsg = "-ERR value is not a valid float\r\n";
+            break;
+          }
+        }
+        if (!valid) {
+          out.write(errorMsg.getBytes(StandardCharsets.UTF_8));
+        } else {
+          int count = (parts.length - 2) / 3;
+          out.write((":" + count + "\r\n").getBytes(StandardCharsets.UTF_8));
+        }
         out.flush();
       }
     } else if (command.equalsIgnoreCase("ZRANGE")) {
