@@ -60,15 +60,17 @@ public class Main {
             } else if (colorAlways) {
                 List<int[]> spans = findMatchSpans(line, pattern);
                 if (!spans.isEmpty()) {
-                    int[] firstSpan = spans.get(0);
-                    int s = firstSpan[0];
-                    int e = firstSpan[1];
-                    String highlighted = line.substring(0, s)
-                            + "\033[01;31m"
-                            + line.substring(s, e)
-                            + "\033[m"
-                            + line.substring(e);
-                    System.out.println(highlighted);
+                    StringBuilder sb = new StringBuilder();
+                    int lastIdx = 0;
+                    for (int[] span : spans) {
+                        sb.append(line, lastIdx, span[0]);
+                        sb.append("\033[01;31m");
+                        sb.append(line, span[0], span[1]);
+                        sb.append("\033[m");
+                        lastIdx = span[1];
+                    }
+                    sb.append(line.substring(lastIdx));
+                    System.out.println(sb.toString());
                     matchedAny = true;
                 }
             } else {
