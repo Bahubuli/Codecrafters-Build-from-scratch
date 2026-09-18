@@ -269,6 +269,17 @@ public class Main {
     return baos.toString(StandardCharsets.UTF_8);
   }
 
+  private static String stripQuotes(String s) {
+    if (s == null) return null;
+    s = s.trim();
+    if ((s.startsWith("\"") && s.endsWith("\"")) || (s.startsWith("'") && s.endsWith("'"))) {
+      if (s.length() >= 2) {
+        return s.substring(1, s.length() - 1);
+      }
+    }
+    return s;
+  }
+
   private static boolean matchesPattern(String pattern, String key) {
     if (pattern.equals("*")) return true;
     if (pattern.endsWith("*")) {
@@ -321,6 +332,7 @@ public class Main {
         }
         out.write("$-1\r\n".getBytes(StandardCharsets.UTF_8));
       }
+      out.flush();
     } else if (command.equalsIgnoreCase("INCR")) {
       if (parts.length < 2) {
         out.write("-ERR wrong number of arguments for 'incr' command\r\n".getBytes(StandardCharsets.UTF_8));
@@ -1169,6 +1181,9 @@ public class Main {
       }
     }
     byte[] bytes = in.readNBytes(len);
+    if (bytes.length < len) {
+      throw new IOException("Unexpected EOF reading string of length " + len);
+    }
     return new String(bytes, StandardCharsets.UTF_8);
   }
 
@@ -1289,15 +1304,15 @@ public class Main {
           i++;
         }
       } else if ("--dir".equalsIgnoreCase(args[i]) && i + 1 < args.length) {
-        rdbDir = args[i + 1];
+        rdbDir = stripQuotes(args[i + 1]);
         i++;
       } else if (args[i].toLowerCase().startsWith("--dir=")) {
-        rdbDir = args[i].substring("--dir=".length());
+        rdbDir = stripQuotes(args[i].substring("--dir=".length()));
       } else if ("--dbfilename".equalsIgnoreCase(args[i]) && i + 1 < args.length) {
-        rdbDbFilename = args[i + 1];
+        rdbDbFilename = stripQuotes(args[i + 1]);
         i++;
       } else if (args[i].toLowerCase().startsWith("--dbfilename=")) {
-        rdbDbFilename = args[i].substring("--dbfilename=".length());
+        rdbDbFilename = stripQuotes(args[i].substring("--dbfilename=".length()));
       }
     }
 
