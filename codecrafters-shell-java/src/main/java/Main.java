@@ -227,14 +227,13 @@ public class Main {
                         if (outPath != null) {
                             pb.redirectOutput(appendOut ? ProcessBuilder.Redirect.appendTo(outPath.toFile()) : ProcessBuilder.Redirect.to(outPath.toFile()));
                         } else {
-                            pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+                            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
                         }
                         if (errPath != null) {
                             pb.redirectError(appendErr ? ProcessBuilder.Redirect.appendTo(errPath.toFile()) : ProcessBuilder.Redirect.to(errPath.toFile()));
                         } else {
-                            pb.redirectError(ProcessBuilder.Redirect.DISCARD);
+                            pb.redirectError(ProcessBuilder.Redirect.INHERIT);
                         }
-                        // pb.redirectInput(ProcessBuilder.Redirect.DISCARD);
                         Process process = pb.start();
                         int jobId = nextJobId.getAndIncrement();
                         long pid = process.pid();
