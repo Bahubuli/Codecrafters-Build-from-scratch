@@ -6,17 +6,12 @@ import java.util.List;
 public class Main {
     public static void main(String[] args) {
         if (args.length < 2) {
-            System.err.println("Usage: ./your_program.sh tokenize <filename>");
+            System.err.println("Usage: ./your_program.sh <command> <filename>");
             System.exit(1);
         }
 
         String command = args[0];
         String filename = args[1];
-
-        if (!command.equals("tokenize")) {
-            System.err.println("Unknown command: " + command);
-            System.exit(1);
-        }
 
         String fileContents = "";
         try {
@@ -26,15 +21,36 @@ public class Main {
             System.exit(1);
         }
 
-        Scanner scanner = new Scanner(fileContents);
-        List<Token> tokens = scanner.scanTokens();
+        if (command.equals("tokenize")) {
+            Scanner scanner = new Scanner(fileContents);
+            List<Token> tokens = scanner.scanTokens();
 
-        for (Token token : tokens) {
-            System.out.println(token);
-        }
+            for (Token token : tokens) {
+                System.out.println(token);
+            }
 
-        if (scanner.hasError()) {
-            System.exit(65);
+            if (scanner.hasError()) {
+                System.exit(65);
+            }
+        } else if (command.equals("parse")) {
+            Scanner scanner = new Scanner(fileContents);
+            List<Token> tokens = scanner.scanTokens();
+
+            if (scanner.hasError()) {
+                System.exit(65);
+            }
+
+            Parser parser = new Parser(tokens);
+            Expr expression = parser.parse();
+
+            if (parser.hasError() || expression == null) {
+                System.exit(65);
+            }
+
+            System.out.println(new AstPrinter().print(expression));
+        } else {
+            System.err.println("Unknown command: " + command);
+            System.exit(1);
         }
     }
 }
