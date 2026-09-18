@@ -320,6 +320,21 @@ public class Main {
 
             out.write(extMsg.array());
             out.flush();
+
+            // Receive extension handshake message
+            PeerMessage extResp = readMessage(in);
+            if (extResp.id == 20 && extResp.payload.length > 1 && extResp.payload[0] == 0) {
+              byte[] dictBytes = Arrays.copyOfRange(extResp.payload, 1, extResp.payload.length);
+              ByteBencodeParser extParser = new ByteBencodeParser(dictBytes);
+              @SuppressWarnings("unchecked")
+              Map<String, Object> extDict = (Map<String, Object>) extParser.parse();
+              @SuppressWarnings("unchecked")
+              Map<String, Object> mDict = (Map<String, Object>) extDict.get("m");
+              if (mDict != null && mDict.containsKey("ut_metadata")) {
+                long utMetadataId = (Long) mDict.get("ut_metadata");
+                System.out.println("Peer Metadata Extension ID: " + utMetadataId);
+              }
+            }
           }
 
           connected = true;
