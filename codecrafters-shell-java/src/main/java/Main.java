@@ -234,7 +234,7 @@ public class Main {
                         } else {
                             pb.redirectError(ProcessBuilder.Redirect.DISCARD);
                         }
-                        pb.redirectInput(ProcessBuilder.Redirect.DISCARD);
+                        // pb.redirectInput(ProcessBuilder.Redirect.DISCARD);
                         Process process = pb.start();
                         int jobId = nextJobId.getAndIncrement();
                         long pid = process.pid();
