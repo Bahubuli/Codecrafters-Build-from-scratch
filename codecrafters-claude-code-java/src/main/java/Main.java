@@ -10,6 +10,7 @@ import com.openai.models.chat.completions.ChatCompletionCreateParams;
 import com.openai.models.chat.completions.ChatCompletionMessage;
 import com.openai.models.chat.completions.ChatCompletionMessageToolCall;
 import com.openai.models.chat.completions.ChatCompletionTool;
+import com.openai.models.chat.completions.ChatCompletionToolMessageParam;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -64,36 +65,51 @@ public class Main {
                 .function(readFunction)
                 .build();
 
-        ChatCompletion response = client.chat().completions().create(
-                ChatCompletionCreateParams.builder()
-                        .model("anthropic/claude-haiku-4.5")
-                        .addUserMessage(prompt)
-                        .addTool(readTool)
-                        .build()
-        );
+        ChatCompletionCreateParams.Builder createParamsBuilder = ChatCompletionCreateParams.builder()
+                .model("anthropic/claude-haiku-4.5")
+                .addUserMessage(prompt)
+                .addTool(readTool);
 
-        if (response.choices().isEmpty()) {
-            throw new RuntimeException("no choices in response");
-        }
+        while (true) {
+            ChatCompletion response = client.chat().completions().create(createParamsBuilder.build());
 
-        ChatCompletionMessage message = response.choices().get(0).message();
-        if (message.toolCalls().isPresent() && !message.toolCalls().get().isEmpty()) {
-            ChatCompletionMessageToolCall toolCall = message.toolCalls().get().get(0);
-            String funcName = toolCall.function().name();
-            if ("Read".equalsIgnoreCase(funcName) || "read_file".equalsIgnoreCase(funcName)) {
-                try {
-                    JsonNode argsNode = OBJECT_MAPPER.readTree(toolCall.function().arguments());
-                    String filePath = argsNode.get("file_path").asText();
-                    String fileContent = Files.readString(Path.of(filePath));
-                    System.out.print(fileContent);
-                } catch (IOException e) {
-                    throw new RuntimeException("Failed to read file for tool call: " + e.getMessage(), e);
-                }
-            } else {
-                throw new UnsupportedOperationException("Unknown tool call: " + funcName);
+            if (response.choices().isEmpty()) {
+                throw new RuntimeException("no choices in response");
             }
-        } else {
-            System.out.print(message.content().orElse(""));
+
+            ChatCompletionMessage assistantMessage = response.choices().get(0).message();
+            createParamsBuilder.addMessage(assistantMessage);
+
+            if (assistantMessage.toolCalls().isEmpty() || assistantMessage.toolCalls().get().isEmpty()) {
+                System.out.print(assistantMessage.content().orElse(""));
+                break;
+            }
+
+            for (ChatCompletionMessageToolCall toolCall : assistantMessage.toolCalls().get()) {
+                String toolCallId = toolCall.id();
+                String funcName = toolCall.function().name();
+                String arguments = toolCall.function().arguments();
+
+                String result;
+                if ("Read".equalsIgnoreCase(funcName) || "read_file".equalsIgnoreCase(funcName)) {
+                    try {
+                        JsonNode argsNode = OBJECT_MAPPER.readTree(arguments);
+                        String filePath = argsNode.get("file_path").asText();
+                        result = Files.readString(Path.of(filePath));
+                    } catch (IOException e) {
+                        result = "Error reading file: " + e.getMessage();
+                    }
+                } else {
+                    result = "Error: Unknown tool " + funcName;
+                }
+
+                createParamsBuilder.addMessage(
+                        ChatCompletionToolMessageParam.builder()
+                                .toolCallId(toolCallId)
+                                .content(result)
+                                .build()
+                );
+            }
         }
     }
 }
