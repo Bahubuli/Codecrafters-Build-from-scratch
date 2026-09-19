@@ -4,6 +4,17 @@ import java.nio.file.Path;
 import java.util.List;
 
 public class Main {
+    public static boolean hadError = false;
+
+    public static void error(Token token, String message) {
+        hadError = true;
+        if (token.type == TokenType.EOF) {
+            System.err.println("[line " + token.line + "] Error at end: " + message);
+        } else {
+            System.err.println("[line " + token.line + "] Error at '" + token.lexeme + "': " + message);
+        }
+    }
+
     public static void main(String[] args) {
         if (args.length < 2) {
             System.err.println("Usage: ./your_program.sh <command> <filename>");
@@ -85,6 +96,13 @@ public class Main {
             }
 
             Interpreter interpreter = new Interpreter();
+            Resolver resolver = new Resolver(interpreter);
+            resolver.resolve(statements);
+
+            if (hadError) {
+                System.exit(65);
+            }
+
             interpreter.interpret(statements);
 
             if (interpreter.hasRuntimeError()) {
