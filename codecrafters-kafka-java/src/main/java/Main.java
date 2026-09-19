@@ -1,3 +1,4 @@
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -29,9 +30,19 @@ public class Main {
                     in.skipBytes(remaining);
                 }
 
+                short errorCode = (apiVersion >= 0 && apiVersion <= 4) ? (short) 0 : (short) 35;
+
+                ByteArrayOutputStream bodyStream = new ByteArrayOutputStream();
+                DataOutputStream bodyOut = new DataOutputStream(bodyStream);
+                bodyOut.writeShort(errorCode);
+                byte[] body = bodyStream.toByteArray();
+
+                int responseMessageSize = 4 + body.length; // correlation_id (4) + body
+
                 DataOutputStream out = new DataOutputStream(clientSocket.getOutputStream());
-                out.writeInt(0); // message_size
-                out.writeInt(correlationId); // echo extracted correlation_id
+                out.writeInt(responseMessageSize);
+                out.writeInt(correlationId);
+                out.write(body);
                 out.flush();
             }
         } catch (IOException e) {
