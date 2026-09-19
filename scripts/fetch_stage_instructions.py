@@ -2,6 +2,10 @@ import sys
 from playwright.sync_api import sync_playwright
 from pathlib import Path
 
+# Ensure UTF-8 output even on Windows consoles
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
 STATE_FILE = Path.home() / ".codecrafters" / "browser_session.json"
 
 def get_stage_instructions(course="bittorrent", stage_slug=None):
