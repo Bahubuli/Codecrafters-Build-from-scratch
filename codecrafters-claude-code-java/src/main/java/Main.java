@@ -13,6 +13,7 @@ import com.openai.models.chat.completions.ChatCompletionTool;
 import com.openai.models.chat.completions.ChatCompletionToolMessageParam;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -86,11 +87,33 @@ public class Main {
                         .build())
                 .build();
 
+        FunctionParameters bashParams = FunctionParameters.builder()
+                .putAdditionalProperty("type", JsonValue.from("object"))
+                .putAdditionalProperty("properties", JsonValue.from(Map.of(
+                        "command", Map.of(
+                                "type", "string",
+                                "description", "The command to execute"
+                        )
+                )))
+                .putAdditionalProperty("required", JsonValue.from(List.of("command")))
+                .build();
+
+        ChatCompletionTool bashTool = ChatCompletionTool.builder()
+                .function(FunctionDefinition.builder()
+                        .name("Bash")
+                        .description("Execute a shell command")
+                        .parameters(bashParams)
+                        .build())
+                .build();
+
         ChatCompletionCreateParams.Builder createParamsBuilder = ChatCompletionCreateParams.builder()
                 .model("anthropic/claude-haiku-4.5")
                 .addUserMessage(prompt)
                 .addTool(readTool)
-                .addTool(writeTool);
+                .addTool(writeTool)
+                .addTool(bashTool);
+
+        boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
 
         while (true) {
             ChatCompletion response = client.chat().completions().create(createParamsBuilder.build());
@@ -134,6 +157,35 @@ public class Main {
                         result = "File written successfully: " + filePath;
                     } catch (IOException e) {
                         result = "Error writing file: " + e.getMessage();
+                    }
+                } else if ("Bash".equalsIgnoreCase(funcName) || "bash".equalsIgnoreCase(funcName) || "RunBashCommand".equalsIgnoreCase(funcName) || "run_bash_command".equalsIgnoreCase(funcName)) {
+                    try {
+                        JsonNode argsNode = OBJECT_MAPPER.readTree(arguments);
+                        String command = argsNode.get("command").asText();
+                        ProcessBuilder pb;
+                        if (isWindows) {
+                            pb = new ProcessBuilder("cmd.exe", "/c", command);
+                        } else {
+                            pb = new ProcessBuilder("bash", "-c", command);
+                        }
+                        Process process = pb.start();
+                        String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                        String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+                        int exitCode = process.waitFor();
+
+                        StringBuilder sb = new StringBuilder();
+                        if (!stdout.isEmpty()) {
+                            sb.append(stdout);
+                        }
+                        if (!stderr.isEmpty()) {
+                            if (sb.length() > 0 && !stdout.endsWith("\n")) {
+                                sb.append("\n");
+                            }
+                            sb.append(stderr);
+                        }
+                        result = sb.toString();
+                    } catch (Exception e) {
+                        result = "Error executing bash command: " + e.getMessage();
                     }
                 } else {
                     result = "Error: Unknown tool " + funcName;
