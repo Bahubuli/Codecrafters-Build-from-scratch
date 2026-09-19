@@ -101,6 +101,9 @@ public class Main {
                 } else if (apiKey == 75) {
                     // DescribeTopicPartitions
                     handleDescribeTopicPartitions(in, out, messageSize, apiVersion, correlationId);
+                } else if (apiKey == 1) {
+                    // Fetch
+                    handleFetch(in, out, messageSize, apiVersion, correlationId);
                 } else {
                     int remaining = messageSize - (2 + 2 + 4);
                     if (remaining > 0) {
@@ -271,6 +274,89 @@ public class Main {
         // next_cursor: -1 (0xFF)
         bodyOut.writeByte((byte) -1);
 
+        // TAG_BUFFER for response body
+        bodyOut.writeByte(0);
+
+        byte[] body = bodyStream.toByteArray();
+
+        // Response Header v1: correlation_id (4B) + TAG_BUFFER (1B)
+        int responseMessageSize = 4 + 1 + body.length;
+
+        out.writeInt(responseMessageSize);
+        out.writeInt(correlationId);
+        out.writeByte(0); // Response Header v1 TAG_BUFFER
+        out.write(body);
+        out.flush();
+    }
+
+    private static void handleFetch(DataInputStream in, DataOutputStream out,
+                                    int messageSize, short apiVersion, int correlationId) throws IOException {
+        // Request Header v2 parsing: client_id + tagged fields
+        short clientIdLen = in.readShort();
+        if (clientIdLen > 0) {
+            in.skipBytes(clientIdLen);
+        }
+        skipTaggedFields(in);
+
+        // Fetch Request Body (v16)
+        int maxWaitMs = in.readInt();
+        int minBytes = in.readInt();
+        int maxBytes = in.readInt();
+        byte isolationLevel = in.readByte();
+        int sessionId = in.readInt();
+        int sessionEpoch = in.readInt();
+
+        // topics (COMPACT_ARRAY)
+        int topicsLen = readUnsignedVarint(in);
+        int numTopics = topicsLen > 0 ? topicsLen - 1 : 0;
+        // In this stage, topics array is empty (numTopics == 0)
+        for (int i = 0; i < numTopics; i++) {
+            byte[] topicId = new byte[16];
+            in.readFully(topicId);
+            int partitionsLen = readUnsignedVarint(in);
+            int numPartitions = partitionsLen > 0 ? partitionsLen - 1 : 0;
+            for (int p = 0; p < numPartitions; p++) {
+                int partition = in.readInt();
+                int currentLeaderEpoch = in.readInt();
+                long fetchOffset = in.readLong();
+                int lastFetchedEpoch = in.readInt();
+                long logStartOffset = in.readLong();
+                int partitionMaxBytes = in.readInt();
+                skipTaggedFields(in);
+            }
+            skipTaggedFields(in);
+        }
+
+        // forgotten_topics_data (COMPACT_ARRAY)
+        int forgottenTopicsLen = readUnsignedVarint(in);
+        int numForgotten = forgottenTopicsLen > 0 ? forgottenTopicsLen - 1 : 0;
+        for (int i = 0; i < numForgotten; i++) {
+            byte[] topicId = new byte[16];
+            in.readFully(topicId);
+            int partitionsLen = readUnsignedVarint(in);
+            int numPartitions = partitionsLen > 0 ? partitionsLen - 1 : 0;
+            for (int p = 0; p < numPartitions; p++) {
+                in.readInt(); // partition
+            }
+            skipTaggedFields(in);
+        }
+
+        // rack_id (COMPACT_STRING)
+        readCompactString(in);
+        skipTaggedFields(in);
+
+        // Fetch Response Body (v16)
+        ByteArrayOutputStream bodyStream = new ByteArrayOutputStream();
+        DataOutputStream bodyOut = new DataOutputStream(bodyStream);
+
+        // throttle_time_ms (INT32): 0
+        bodyOut.writeInt(0);
+        // error_code (INT16): 0 (no error)
+        bodyOut.writeShort((short) 0);
+        // session_id (INT32): 0
+        bodyOut.writeInt(0);
+        // responses (COMPACT_ARRAY): 0 elements -> 1
+        writeUnsignedVarint(bodyOut, 1);
         // TAG_BUFFER for response body
         bodyOut.writeByte(0);
 
