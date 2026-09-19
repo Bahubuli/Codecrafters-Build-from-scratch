@@ -12,6 +12,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -399,15 +400,23 @@ public class Main {
                     // TAG_BUFFER for partition response
                     bodyOut.writeByte(0);
                 } else {
-                    // For known topic with empty partitions
+                    // Known topic: read partition log from disk
+                    byte[] recordBytes = readPartitionLog(ti.name, partitionIndex);
+
+                    // error_code: 0 (NO_ERROR)
                     bodyOut.writeShort((short) 0);
-                    bodyOut.writeLong(0L);
-                    bodyOut.writeLong(0L);
-                    bodyOut.writeLong(0L);
-                    writeUnsignedVarint(bodyOut, 1);
-                    bodyOut.writeInt(0);
-                    writeUnsignedVarint(bodyOut, 1);
-                    bodyOut.writeByte(0);
+                    bodyOut.writeLong(0L); // high_watermark
+                    bodyOut.writeLong(0L); // last_stable_offset
+                    bodyOut.writeLong(0L); // log_start_offset
+                    writeUnsignedVarint(bodyOut, 1); // aborted_transactions (empty)
+                    bodyOut.writeInt(0); // preferred_read_replica
+
+                    // records: COMPACT_RECORDS (length + 1 followed by bytes)
+                    writeUnsignedVarint(bodyOut, recordBytes.length + 1);
+                    if (recordBytes.length > 0) {
+                        bodyOut.write(recordBytes);
+                    }
+                    bodyOut.writeByte(0); // TAG_BUFFER
                 }
             }
             // TAG_BUFFER for topic response
@@ -429,14 +438,7 @@ public class Main {
         out.flush();
     }
 
-    static class MetadataCatalog {
-        final Map<String, TopicInfo> byName = new HashMap<>();
-        final Map<ByteBuffer, TopicInfo> byId = new HashMap<>();
-    }
-
-    private static MetadataCatalog loadClusterMetadata() {
-        MetadataCatalog catalog = new MetadataCatalog();
-
+    private static String getLogDir() {
         String logDir = "/tmp/kraft-combined-logs";
         if (serverPropertiesPath != null) {
             File propsFile = new File(serverPropertiesPath);
@@ -454,6 +456,30 @@ public class Main {
                 } catch (IOException ignored) {}
             }
         }
+        return logDir;
+    }
+
+    private static byte[] readPartitionLog(String topicName, int partitionIndex) {
+        String logDir = getLogDir();
+        File logFile = new File(logDir, topicName + "-" + partitionIndex + "/00000000000000000000.log");
+        if (logFile.exists() && logFile.isFile()) {
+            try {
+                return Files.readAllBytes(logFile.toPath());
+            } catch (IOException e) {
+                System.err.println("Error reading partition log: " + e.getMessage());
+            }
+        }
+        return new byte[0];
+    }
+
+    static class MetadataCatalog {
+        final Map<String, TopicInfo> byName = new HashMap<>();
+        final Map<ByteBuffer, TopicInfo> byId = new HashMap<>();
+    }
+
+    private static MetadataCatalog loadClusterMetadata() {
+        MetadataCatalog catalog = new MetadataCatalog();
+        String logDir = getLogDir();
 
         File metadataLog = new File(logDir, "__cluster_metadata-0/00000000000000000000.log");
         if (!metadataLog.exists()) {
