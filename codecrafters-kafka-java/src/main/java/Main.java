@@ -1,29 +1,51 @@
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class Main {
     public static void main(String[] args) {
         System.err.println("Logs from your program will appear here!");
 
         int port = 9092;
+        ExecutorService pool = Executors.newCachedThreadPool();
+
         try (ServerSocket serverSocket = new ServerSocket(port)) {
             serverSocket.setReuseAddress(true);
 
-            try (Socket clientSocket = serverSocket.accept()) {
-                System.err.println("Client connected!");
-                DataInputStream in = new DataInputStream(clientSocket.getInputStream());
+            while (true) {
+                Socket clientSocket = serverSocket.accept();
+                pool.submit(() -> handleClient(clientSocket));
+            }
+        } catch (IOException e) {
+            System.err.println("IOException: " + e.getMessage());
+        } finally {
+            pool.shutdown();
+        }
+    }
 
-                int messageSize = in.readInt();
+    private static void handleClient(Socket clientSocket) {
+        try (clientSocket;
+             DataInputStream in = new DataInputStream(clientSocket.getInputStream());
+             DataOutputStream out = new DataOutputStream(clientSocket.getOutputStream())) {
+
+            while (true) {
+                int messageSize;
+                try {
+                    messageSize = in.readInt();
+                } catch (EOFException e) {
+                    // Normal client disconnection
+                    break;
+                }
+
                 short apiKey = in.readShort();
                 short apiVersion = in.readShort();
                 int correlationId = in.readInt();
-
-                System.err.printf("Request: size=%d, apiKey=%d, apiVersion=%d, correlationId=%d%n",
-                        messageSize, apiKey, apiVersion, correlationId);
 
                 int remaining = messageSize - (2 + 2 + 4);
                 if (remaining > 0) {
@@ -56,14 +78,13 @@ public class Main {
                 byte[] body = bodyStream.toByteArray();
                 int responseMessageSize = 4 + body.length; // correlation_id (4B) + body
 
-                DataOutputStream out = new DataOutputStream(clientSocket.getOutputStream());
                 out.writeInt(responseMessageSize);
                 out.writeInt(correlationId);
                 out.write(body);
                 out.flush();
             }
         } catch (IOException e) {
-            System.err.println("IOException: " + e.getMessage());
+            System.err.println("Client handler exception: " + e.getMessage());
         }
     }
 
