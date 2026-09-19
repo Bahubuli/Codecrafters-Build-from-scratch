@@ -51,6 +51,15 @@ public class Main {
         }
     }
 
+    static class FetchTopicRequest {
+        final byte[] topicId;
+        final List<Integer> partitions = new ArrayList<>();
+
+        FetchTopicRequest(byte[] topicId) {
+            this.topicId = topicId;
+        }
+    }
+
     public static void main(String[] args) {
         System.err.println("Logs from your program will appear here!");
         if (args.length > 0) {
@@ -193,7 +202,7 @@ public class Main {
         Collections.sort(topicNames);
 
         // Load cluster metadata from disk
-        Map<String, TopicInfo> topicsMap = loadClusterMetadata();
+        MetadataCatalog catalog = loadClusterMetadata();
 
         // Build DescribeTopicPartitions Response Body v0
         ByteArrayOutputStream bodyStream = new ByteArrayOutputStream();
@@ -205,7 +214,7 @@ public class Main {
         // topics (COMPACT_ARRAY)
         writeUnsignedVarint(bodyOut, topicNames.size() + 1);
         for (String topicName : topicNames) {
-            TopicInfo topic = topicsMap.get(topicName);
+            TopicInfo topic = catalog.byName.get(topicName);
             if (topic == null) {
                 // error_code: 3 (UNKNOWN_TOPIC_OR_PARTITION)
                 bodyOut.writeShort((short) 3);
@@ -309,10 +318,11 @@ public class Main {
         // topics (COMPACT_ARRAY)
         int topicsLen = readUnsignedVarint(in);
         int numTopics = topicsLen > 0 ? topicsLen - 1 : 0;
-        // In this stage, topics array is empty (numTopics == 0)
+        List<FetchTopicRequest> fetchTopics = new ArrayList<>();
         for (int i = 0; i < numTopics; i++) {
             byte[] topicId = new byte[16];
             in.readFully(topicId);
+            FetchTopicRequest ftr = new FetchTopicRequest(topicId);
             int partitionsLen = readUnsignedVarint(in);
             int numPartitions = partitionsLen > 0 ? partitionsLen - 1 : 0;
             for (int p = 0; p < numPartitions; p++) {
@@ -323,8 +333,10 @@ public class Main {
                 long logStartOffset = in.readLong();
                 int partitionMaxBytes = in.readInt();
                 skipTaggedFields(in);
+                ftr.partitions.add(partition);
             }
             skipTaggedFields(in);
+            fetchTopics.add(ftr);
         }
 
         // forgotten_topics_data (COMPACT_ARRAY)
@@ -345,18 +357,63 @@ public class Main {
         readCompactString(in);
         skipTaggedFields(in);
 
+        // Load cluster metadata
+        MetadataCatalog catalog = loadClusterMetadata();
+
         // Fetch Response Body (v16)
         ByteArrayOutputStream bodyStream = new ByteArrayOutputStream();
         DataOutputStream bodyOut = new DataOutputStream(bodyStream);
 
         // throttle_time_ms (INT32): 0
         bodyOut.writeInt(0);
-        // error_code (INT16): 0 (no error)
+        // error_code (INT16): 0 (no error at top level)
         bodyOut.writeShort((short) 0);
         // session_id (INT32): 0
         bodyOut.writeInt(0);
-        // responses (COMPACT_ARRAY): 0 elements -> 1
-        writeUnsignedVarint(bodyOut, 1);
+
+        // responses (COMPACT_ARRAY)
+        writeUnsignedVarint(bodyOut, fetchTopics.size() + 1);
+        for (FetchTopicRequest ftr : fetchTopics) {
+            bodyOut.write(ftr.topicId);
+            TopicInfo ti = catalog.byId.get(ByteBuffer.wrap(ftr.topicId));
+
+            // partitions array
+            writeUnsignedVarint(bodyOut, ftr.partitions.size() + 1);
+            for (int partitionIndex : ftr.partitions) {
+                bodyOut.writeInt(partitionIndex);
+                if (ti == null) {
+                    // error_code: 100 (UNKNOWN_TOPIC_ID)
+                    bodyOut.writeShort((short) 100);
+                    // high_watermark: 0 (INT64)
+                    bodyOut.writeLong(0L);
+                    // last_stable_offset: 0 (INT64)
+                    bodyOut.writeLong(0L);
+                    // log_start_offset: 0 (INT64)
+                    bodyOut.writeLong(0L);
+                    // aborted_transactions: empty COMPACT_ARRAY (0 elements -> 1)
+                    writeUnsignedVarint(bodyOut, 1);
+                    // preferred_read_replica: 0 (INT32)
+                    bodyOut.writeInt(0);
+                    // records: empty COMPACT_RECORDS (0 length -> 1)
+                    writeUnsignedVarint(bodyOut, 1);
+                    // TAG_BUFFER for partition response
+                    bodyOut.writeByte(0);
+                } else {
+                    // For known topic with empty partitions
+                    bodyOut.writeShort((short) 0);
+                    bodyOut.writeLong(0L);
+                    bodyOut.writeLong(0L);
+                    bodyOut.writeLong(0L);
+                    writeUnsignedVarint(bodyOut, 1);
+                    bodyOut.writeInt(0);
+                    writeUnsignedVarint(bodyOut, 1);
+                    bodyOut.writeByte(0);
+                }
+            }
+            // TAG_BUFFER for topic response
+            bodyOut.writeByte(0);
+        }
+
         // TAG_BUFFER for response body
         bodyOut.writeByte(0);
 
@@ -372,9 +429,13 @@ public class Main {
         out.flush();
     }
 
-    private static Map<String, TopicInfo> loadClusterMetadata() {
-        Map<String, TopicInfo> topicsMap = new HashMap<>();
-        Map<ByteBuffer, TopicInfo> topicByIdMap = new HashMap<>();
+    static class MetadataCatalog {
+        final Map<String, TopicInfo> byName = new HashMap<>();
+        final Map<ByteBuffer, TopicInfo> byId = new HashMap<>();
+    }
+
+    private static MetadataCatalog loadClusterMetadata() {
+        MetadataCatalog catalog = new MetadataCatalog();
 
         String logDir = "/tmp/kraft-combined-logs";
         if (serverPropertiesPath != null) {
@@ -396,7 +457,7 @@ public class Main {
 
         File metadataLog = new File(logDir, "__cluster_metadata-0/00000000000000000000.log");
         if (!metadataLog.exists()) {
-            return topicsMap;
+            return catalog;
         }
 
         try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(metadataLog)))) {
@@ -434,7 +495,7 @@ public class Main {
                     if (valueLength > 0) {
                         byte[] valBytes = new byte[valueLength];
                         buf.get(valBytes);
-                        parseMetadataRecord(ByteBuffer.wrap(valBytes), topicsMap, topicByIdMap);
+                        parseMetadataRecord(ByteBuffer.wrap(valBytes), catalog);
                     }
 
                     int headersCount = readUnsignedVarint(buf);
@@ -450,12 +511,10 @@ public class Main {
             System.err.println("Error reading cluster metadata: " + e.getMessage());
         }
 
-        return topicsMap;
+        return catalog;
     }
 
-    private static void parseMetadataRecord(ByteBuffer buf,
-                                            Map<String, TopicInfo> topicsMap,
-                                            Map<ByteBuffer, TopicInfo> topicByIdMap) {
+    private static void parseMetadataRecord(ByteBuffer buf, MetadataCatalog catalog) {
         try {
             int frameVersion = readUnsignedVarint(buf);
             int apiKey = readUnsignedVarint(buf);
@@ -469,8 +528,8 @@ public class Main {
                 int tags = readUnsignedVarint(buf);
 
                 TopicInfo ti = new TopicInfo(topicName, topicId);
-                topicsMap.put(topicName, ti);
-                topicByIdMap.put(ByteBuffer.wrap(topicId), ti);
+                catalog.byName.put(topicName, ti);
+                catalog.byId.put(ByteBuffer.wrap(topicId), ti);
             } else if (apiKey == 3) {
                 // PartitionRecord
                 int partitionId = buf.getInt();
@@ -504,7 +563,7 @@ public class Main {
                 int partitionEpoch = buf.getInt();
 
                 PartitionInfo pi = new PartitionInfo(partitionId, leader, leaderEpoch, replicas, isr);
-                TopicInfo ti = topicByIdMap.get(ByteBuffer.wrap(topicId));
+                TopicInfo ti = catalog.byId.get(ByteBuffer.wrap(topicId));
                 if (ti != null) {
                     ti.partitions.add(pi);
                 }
