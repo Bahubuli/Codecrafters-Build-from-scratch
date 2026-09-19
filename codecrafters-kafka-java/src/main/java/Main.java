@@ -6,6 +6,7 @@ import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -61,9 +62,19 @@ public class Main {
         }
     }
 
+    static class ProducePartitionData {
+        final int index;
+        final byte[] records;
+
+        ProducePartitionData(int index, byte[] records) {
+            this.index = index;
+            this.records = records;
+        }
+    }
+
     static class ProduceTopicData {
         final String name;
-        final List<Integer> partitions = new ArrayList<>();
+        final List<ProducePartitionData> partitions = new ArrayList<>();
 
         ProduceTopicData(String name) {
             this.name = name;
@@ -481,12 +492,14 @@ public class Main {
             int numPartitions = partitionsLen > 0 ? partitionsLen - 1 : 0;
             for (int p = 0; p < numPartitions; p++) {
                 int partitionIndex = in.readInt();
-                ptd.partitions.add(partitionIndex);
                 int recordsLen = readUnsignedVarint(in);
+                byte[] records = new byte[0];
                 if (recordsLen > 1) {
-                    in.skipBytes(recordsLen - 1);
+                    records = new byte[recordsLen - 1];
+                    in.readFully(records);
                 }
                 skipTaggedFields(in);
+                ptd.partitions.add(new ProducePartitionData(partitionIndex, records));
             }
             skipTaggedFields(in);
             produceTopics.add(ptd);
@@ -508,13 +521,13 @@ public class Main {
 
             // partition_responses (COMPACT_ARRAY)
             writeUnsignedVarint(bodyOut, ptd.partitions.size() + 1);
-            for (int partitionIndex : ptd.partitions) {
-                bodyOut.writeInt(partitionIndex);
+            for (ProducePartitionData ppd : ptd.partitions) {
+                bodyOut.writeInt(ppd.index);
 
                 boolean partitionExists = false;
                 if (ti != null) {
                     for (PartitionInfo pi : ti.partitions) {
-                        if (pi.partitionId == partitionIndex) {
+                        if (pi.partitionId == ppd.index) {
                             partitionExists = true;
                             break;
                         }
@@ -522,6 +535,9 @@ public class Main {
                 }
 
                 if (partitionExists) {
+                    // Persist records to partition log
+                    writePartitionLog(ptd.name, ppd.index, ppd.records);
+
                     bodyOut.writeShort((short) 0); // NO_ERROR
                     bodyOut.writeLong(0L); // base_offset: 0
                     bodyOut.writeLong(-1L); // log_append_time_ms: -1
@@ -590,6 +606,22 @@ public class Main {
             }
         }
         return new byte[0];
+    }
+
+    private static void writePartitionLog(String topicName, int partitionIndex, byte[] records) {
+        if (records == null || records.length == 0) return;
+        String logDir = getLogDir();
+        File partitionDir = new File(logDir, topicName + "-" + partitionIndex);
+        if (!partitionDir.exists()) {
+            partitionDir.mkdirs();
+        }
+        File logFile = new File(partitionDir, "00000000000000000000.log");
+        try (FileOutputStream fos = new FileOutputStream(logFile, true)) {
+            fos.write(records);
+            fos.flush();
+        } catch (IOException e) {
+            System.err.println("Error writing partition log: " + e.getMessage());
+        }
     }
 
     static class MetadataCatalog {
