@@ -61,6 +61,15 @@ public class Main {
         }
     }
 
+    static class ProduceTopicData {
+        final String name;
+        final List<Integer> partitions = new ArrayList<>();
+
+        ProduceTopicData(String name) {
+            this.name = name;
+        }
+    }
+
     public static void main(String[] args) {
         System.err.println("Logs from your program will appear here!");
         if (args.length > 0) {
@@ -114,6 +123,9 @@ public class Main {
                 } else if (apiKey == 1) {
                     // Fetch
                     handleFetch(in, out, messageSize, apiVersion, correlationId);
+                } else if (apiKey == 0) {
+                    // Produce
+                    handleProduce(in, out, messageSize, apiVersion, correlationId);
                 } else {
                     int remaining = messageSize - (2 + 2 + 4);
                     if (remaining > 0) {
@@ -428,6 +440,85 @@ public class Main {
             // TAG_BUFFER for topic response
             bodyOut.writeByte(0);
         }
+
+        // TAG_BUFFER for response body
+        bodyOut.writeByte(0);
+
+        byte[] body = bodyStream.toByteArray();
+
+        // Response Header v1: correlation_id (4B) + TAG_BUFFER (1B)
+        int responseMessageSize = 4 + 1 + body.length;
+
+        out.writeInt(responseMessageSize);
+        out.writeInt(correlationId);
+        out.writeByte(0); // Response Header v1 TAG_BUFFER
+        out.write(body);
+        out.flush();
+    }
+
+    private static void handleProduce(DataInputStream in, DataOutputStream out,
+                                      int messageSize, short apiVersion, int correlationId) throws IOException {
+        // Request Header v2 parsing: client_id + tagged fields
+        short clientIdLen = in.readShort();
+        if (clientIdLen > 0) {
+            in.skipBytes(clientIdLen);
+        }
+        skipTaggedFields(in);
+
+        // Produce Request Body (v11)
+        String transactionalId = readCompactString(in);
+        short acks = in.readShort();
+        int timeoutMs = in.readInt();
+
+        // topic_data (COMPACT_ARRAY)
+        int topicsLen = readUnsignedVarint(in);
+        int numTopics = topicsLen > 0 ? topicsLen - 1 : 0;
+        List<ProduceTopicData> produceTopics = new ArrayList<>();
+        for (int i = 0; i < numTopics; i++) {
+            String topicName = readCompactString(in);
+            ProduceTopicData ptd = new ProduceTopicData(topicName);
+            int partitionsLen = readUnsignedVarint(in);
+            int numPartitions = partitionsLen > 0 ? partitionsLen - 1 : 0;
+            for (int p = 0; p < numPartitions; p++) {
+                int partitionIndex = in.readInt();
+                ptd.partitions.add(partitionIndex);
+                int recordsLen = readUnsignedVarint(in);
+                if (recordsLen > 1) {
+                    in.skipBytes(recordsLen - 1);
+                }
+                skipTaggedFields(in);
+            }
+            skipTaggedFields(in);
+            produceTopics.add(ptd);
+        }
+        skipTaggedFields(in);
+
+        // Produce Response Body (v11)
+        ByteArrayOutputStream bodyStream = new ByteArrayOutputStream();
+        DataOutputStream bodyOut = new DataOutputStream(bodyStream);
+
+        // responses (COMPACT_ARRAY)
+        writeUnsignedVarint(bodyOut, produceTopics.size() + 1);
+        for (ProduceTopicData ptd : produceTopics) {
+            writeCompactString(bodyOut, ptd.name);
+
+            // partition_responses (COMPACT_ARRAY)
+            writeUnsignedVarint(bodyOut, ptd.partitions.size() + 1);
+            for (int partitionIndex : ptd.partitions) {
+                bodyOut.writeInt(partitionIndex);
+                bodyOut.writeShort((short) 3); // UNKNOWN_TOPIC_OR_PARTITION
+                bodyOut.writeLong(-1L); // base_offset
+                bodyOut.writeLong(-1L); // log_append_time_ms
+                bodyOut.writeLong(-1L); // log_start_offset
+                writeUnsignedVarint(bodyOut, 1); // record_errors (empty)
+                writeUnsignedVarint(bodyOut, 0); // error_message (null)
+                bodyOut.writeByte(0); // TAG_BUFFER for partition response
+            }
+            bodyOut.writeByte(0); // TAG_BUFFER for topic response
+        }
+
+        // throttle_time_ms (INT32)
+        bodyOut.writeInt(0);
 
         // TAG_BUFFER for response body
         bodyOut.writeByte(0);
