@@ -44,7 +44,7 @@ public class Main {
                 .baseUrl(baseUrl)
                 .build();
 
-        FunctionParameters parameters = FunctionParameters.builder()
+        FunctionParameters readParams = FunctionParameters.builder()
                 .putAdditionalProperty("type", JsonValue.from("object"))
                 .putAdditionalProperty("properties", JsonValue.from(Map.of(
                         "file_path", Map.of(
@@ -55,20 +55,42 @@ public class Main {
                 .putAdditionalProperty("required", JsonValue.from(List.of("file_path")))
                 .build();
 
-        FunctionDefinition readFunction = FunctionDefinition.builder()
-                .name("Read")
-                .description("Read and return the contents of a file")
-                .parameters(parameters)
+        ChatCompletionTool readTool = ChatCompletionTool.builder()
+                .function(FunctionDefinition.builder()
+                        .name("Read")
+                        .description("Read and return the contents of a file")
+                        .parameters(readParams)
+                        .build())
                 .build();
 
-        ChatCompletionTool readTool = ChatCompletionTool.builder()
-                .function(readFunction)
+        FunctionParameters writeParams = FunctionParameters.builder()
+                .putAdditionalProperty("type", JsonValue.from("object"))
+                .putAdditionalProperty("properties", JsonValue.from(Map.of(
+                        "file_path", Map.of(
+                                "type", "string",
+                                "description", "The path of the file to write to"
+                        ),
+                        "content", Map.of(
+                                "type", "string",
+                                "description", "The content to write to the file"
+                        )
+                )))
+                .putAdditionalProperty("required", JsonValue.from(List.of("file_path", "content")))
+                .build();
+
+        ChatCompletionTool writeTool = ChatCompletionTool.builder()
+                .function(FunctionDefinition.builder()
+                        .name("Write")
+                        .description("Write content to a file")
+                        .parameters(writeParams)
+                        .build())
                 .build();
 
         ChatCompletionCreateParams.Builder createParamsBuilder = ChatCompletionCreateParams.builder()
                 .model("anthropic/claude-haiku-4.5")
                 .addUserMessage(prompt)
-                .addTool(readTool);
+                .addTool(readTool)
+                .addTool(writeTool);
 
         while (true) {
             ChatCompletion response = client.chat().completions().create(createParamsBuilder.build());
@@ -98,6 +120,20 @@ public class Main {
                         result = Files.readString(Path.of(filePath));
                     } catch (IOException e) {
                         result = "Error reading file: " + e.getMessage();
+                    }
+                } else if ("Write".equalsIgnoreCase(funcName) || "write_file".equalsIgnoreCase(funcName) || "WriteFile".equalsIgnoreCase(funcName)) {
+                    try {
+                        JsonNode argsNode = OBJECT_MAPPER.readTree(arguments);
+                        String filePath = argsNode.get("file_path").asText();
+                        String content = argsNode.has("content") ? argsNode.get("content").asText() : "";
+                        Path path = Path.of(filePath);
+                        if (path.getParent() != null) {
+                            Files.createDirectories(path.getParent());
+                        }
+                        Files.writeString(path, content);
+                        result = "File written successfully: " + filePath;
+                    } catch (IOException e) {
+                        result = "Error writing file: " + e.getMessage();
                     }
                 } else {
                     result = "Error: Unknown tool " + funcName;
