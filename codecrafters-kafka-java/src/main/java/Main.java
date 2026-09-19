@@ -1,6 +1,6 @@
+import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 
@@ -14,14 +14,24 @@ public class Main {
 
             try (Socket clientSocket = serverSocket.accept()) {
                 System.err.println("Client connected!");
-                InputStream in = clientSocket.getInputStream();
-                byte[] buffer = new byte[1024];
-                int bytesRead = in.read(buffer);
-                System.err.println("Read " + bytesRead + " bytes from client");
+                DataInputStream in = new DataInputStream(clientSocket.getInputStream());
+
+                int messageSize = in.readInt();
+                short apiKey = in.readShort();
+                short apiVersion = in.readShort();
+                int correlationId = in.readInt();
+
+                System.err.printf("Request: size=%d, apiKey=%d, apiVersion=%d, correlationId=%d%n",
+                        messageSize, apiKey, apiVersion, correlationId);
+
+                int remaining = messageSize - (2 + 2 + 4);
+                if (remaining > 0) {
+                    in.skipBytes(remaining);
+                }
 
                 DataOutputStream out = new DataOutputStream(clientSocket.getOutputStream());
-                out.writeInt(0); // message_size (4 bytes)
-                out.writeInt(7); // correlation_id (4 bytes)
+                out.writeInt(0); // message_size
+                out.writeInt(correlationId); // echo extracted correlation_id
                 out.flush();
             }
         } catch (IOException e) {
