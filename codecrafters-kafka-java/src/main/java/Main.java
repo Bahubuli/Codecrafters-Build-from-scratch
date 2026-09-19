@@ -13,6 +13,7 @@ import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -216,6 +217,10 @@ public class Main {
                 bodyOut.write(topic.topicId);
                 // is_internal: boolean (false -> 0)
                 bodyOut.writeByte(0);
+
+                // Sort partitions ascending by partitionId
+                topic.partitions.sort(Comparator.comparingInt(p -> p.partitionId));
+
                 // partitions: COMPACT_ARRAY
                 writeUnsignedVarint(bodyOut, topic.partitions.size() + 1);
                 for (PartitionInfo p : topic.partitions) {
