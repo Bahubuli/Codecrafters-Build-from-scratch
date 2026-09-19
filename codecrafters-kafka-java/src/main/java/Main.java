@@ -493,6 +493,9 @@ public class Main {
         }
         skipTaggedFields(in);
 
+        // Load cluster metadata
+        MetadataCatalog catalog = loadClusterMetadata();
+
         // Produce Response Body (v11)
         ByteArrayOutputStream bodyStream = new ByteArrayOutputStream();
         DataOutputStream bodyOut = new DataOutputStream(bodyStream);
@@ -501,15 +504,35 @@ public class Main {
         writeUnsignedVarint(bodyOut, produceTopics.size() + 1);
         for (ProduceTopicData ptd : produceTopics) {
             writeCompactString(bodyOut, ptd.name);
+            TopicInfo ti = catalog.byName.get(ptd.name);
 
             // partition_responses (COMPACT_ARRAY)
             writeUnsignedVarint(bodyOut, ptd.partitions.size() + 1);
             for (int partitionIndex : ptd.partitions) {
                 bodyOut.writeInt(partitionIndex);
-                bodyOut.writeShort((short) 3); // UNKNOWN_TOPIC_OR_PARTITION
-                bodyOut.writeLong(-1L); // base_offset
-                bodyOut.writeLong(-1L); // log_append_time_ms
-                bodyOut.writeLong(-1L); // log_start_offset
+
+                boolean partitionExists = false;
+                if (ti != null) {
+                    for (PartitionInfo pi : ti.partitions) {
+                        if (pi.partitionId == partitionIndex) {
+                            partitionExists = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (partitionExists) {
+                    bodyOut.writeShort((short) 0); // NO_ERROR
+                    bodyOut.writeLong(0L); // base_offset: 0
+                    bodyOut.writeLong(-1L); // log_append_time_ms: -1
+                    bodyOut.writeLong(0L); // log_start_offset: 0
+                } else {
+                    bodyOut.writeShort((short) 3); // UNKNOWN_TOPIC_OR_PARTITION
+                    bodyOut.writeLong(-1L); // base_offset: -1
+                    bodyOut.writeLong(-1L); // log_append_time_ms: -1
+                    bodyOut.writeLong(-1L); // log_start_offset: -1
+                }
+
                 writeUnsignedVarint(bodyOut, 1); // record_errors (empty)
                 writeUnsignedVarint(bodyOut, 0); // error_message (null)
                 bodyOut.writeByte(0); // TAG_BUFFER for partition response
