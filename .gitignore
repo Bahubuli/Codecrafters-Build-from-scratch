@@ -1,5 +1,8 @@
 target/
+*/target/
 .shell-repo/
 .http-repo/
 .dns-repo/
 .*-repo/
+__pycache__/
+*/__pycache__/
