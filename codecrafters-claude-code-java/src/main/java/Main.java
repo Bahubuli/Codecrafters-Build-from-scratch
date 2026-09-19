@@ -1,3 +1,5 @@
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.JsonValue;
@@ -5,12 +7,19 @@ import com.openai.models.FunctionDefinition;
 import com.openai.models.FunctionParameters;
 import com.openai.models.chat.completions.ChatCompletion;
 import com.openai.models.chat.completions.ChatCompletionCreateParams;
+import com.openai.models.chat.completions.ChatCompletionMessage;
+import com.openai.models.chat.completions.ChatCompletionMessageToolCall;
 import com.openai.models.chat.completions.ChatCompletionTool;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
 public class Main {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     public static void main(String[] args) {
         if (args.length < 2 || !"-p".equals(args[0])) {
             System.err.println("Usage: program -p <prompt>");
@@ -67,6 +76,24 @@ public class Main {
             throw new RuntimeException("no choices in response");
         }
 
-        System.out.print(response.choices().get(0).message().content().orElse(""));
+        ChatCompletionMessage message = response.choices().get(0).message();
+        if (message.toolCalls().isPresent() && !message.toolCalls().get().isEmpty()) {
+            ChatCompletionMessageToolCall toolCall = message.toolCalls().get().get(0);
+            String funcName = toolCall.function().name();
+            if ("Read".equalsIgnoreCase(funcName) || "read_file".equalsIgnoreCase(funcName)) {
+                try {
+                    JsonNode argsNode = OBJECT_MAPPER.readTree(toolCall.function().arguments());
+                    String filePath = argsNode.get("file_path").asText();
+                    String fileContent = Files.readString(Path.of(filePath));
+                    System.out.print(fileContent);
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to read file for tool call: " + e.getMessage(), e);
+                }
+            } else {
+                throw new UnsupportedOperationException("Unknown tool call: " + funcName);
+            }
+        } else {
+            System.out.print(message.content().orElse(""));
+        }
     }
 }
