@@ -13,6 +13,7 @@ import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -178,6 +179,9 @@ public class Main {
         int responsePartitionLimit = in.readInt();
         byte cursor = in.readByte();
         skipTaggedFields(in);
+
+        // Sort topic names alphabetically as required by CodeCrafters specification
+        Collections.sort(topicNames);
 
         // Load cluster metadata from disk
         Map<String, TopicInfo> topicsMap = loadClusterMetadata();
