@@ -1,4 +1,6 @@
+import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 
@@ -8,13 +10,19 @@ public class Main {
 
         int port = 9092;
         try (ServerSocket serverSocket = new ServerSocket(port)) {
-            // Since the tester restarts your program quite often, setting SO_REUSEADDR
-            // ensures that we don't run into 'Address already in use' errors
             serverSocket.setReuseAddress(true);
 
-            // Wait for connection from client.
             try (Socket clientSocket = serverSocket.accept()) {
                 System.err.println("Client connected!");
+                InputStream in = clientSocket.getInputStream();
+                byte[] buffer = new byte[1024];
+                int bytesRead = in.read(buffer);
+                System.err.println("Read " + bytesRead + " bytes from client");
+
+                DataOutputStream out = new DataOutputStream(clientSocket.getOutputStream());
+                out.writeInt(0); // message_size (4 bytes)
+                out.writeInt(7); // correlation_id (4 bytes)
+                out.flush();
             }
         } catch (IOException e) {
             System.err.println("IOException: " + e.getMessage());
