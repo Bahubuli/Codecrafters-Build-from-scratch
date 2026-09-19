@@ -140,8 +140,8 @@ public class Main {
         bodyOut.writeShort(errorCode);
 
         if (errorCode == 0) {
-            // api_keys (COMPACT_ARRAY): 3 keys -> length + 1 = 4
-            writeUnsignedVarint(bodyOut, 4);
+            // api_keys (COMPACT_ARRAY): 4 keys -> length + 1 = 5
+            writeUnsignedVarint(bodyOut, 5);
 
             // Entry 1: ApiVersions (key: 18, min: 0, max: 4)
             bodyOut.writeShort((short) 18);
@@ -159,6 +159,12 @@ public class Main {
             bodyOut.writeShort((short) 1);
             bodyOut.writeShort((short) 0);
             bodyOut.writeShort((short) 16);
+            bodyOut.writeByte(0); // TAG_BUFFER
+
+            // Entry 4: Produce (key: 0, min: 0, max: 11)
+            bodyOut.writeShort((short) 0);
+            bodyOut.writeShort((short) 0);
+            bodyOut.writeShort((short) 11);
             bodyOut.writeByte(0); // TAG_BUFFER
 
             // throttle_time_ms (INT32)
