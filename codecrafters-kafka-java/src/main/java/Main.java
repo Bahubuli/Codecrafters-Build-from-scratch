@@ -47,6 +47,9 @@ public class Main {
                 short apiVersion = in.readShort();
                 int correlationId = in.readInt();
 
+                System.err.printf("Request: size=%d, apiKey=%d, apiVersion=%d, correlationId=%d%n",
+                        messageSize, apiKey, apiVersion, correlationId);
+
                 int remaining = messageSize - (2 + 2 + 4);
                 if (remaining > 0) {
                     in.skipBytes(remaining);
@@ -59,14 +62,20 @@ public class Main {
                 bodyOut.writeShort(errorCode);
 
                 if (errorCode == 0) {
-                    // api_keys (COMPACT_ARRAY): length + 1 as unsigned varint (1 key -> 2)
-                    writeUnsignedVarint(bodyOut, 2);
+                    // api_keys (COMPACT_ARRAY): 2 keys -> length + 1 = 3
+                    writeUnsignedVarint(bodyOut, 3);
 
                     // Entry 1: ApiVersions (key: 18, min: 0, max: 4)
                     bodyOut.writeShort((short) 18);
                     bodyOut.writeShort((short) 0);
                     bodyOut.writeShort((short) 4);
-                    bodyOut.writeByte(0); // TAG_BUFFER for api_key entry
+                    bodyOut.writeByte(0); // TAG_BUFFER
+
+                    // Entry 2: DescribeTopicPartitions (key: 75, min: 0, max: 0)
+                    bodyOut.writeShort((short) 75);
+                    bodyOut.writeShort((short) 0);
+                    bodyOut.writeShort((short) 0);
+                    bodyOut.writeByte(0); // TAG_BUFFER
 
                     // throttle_time_ms (INT32)
                     bodyOut.writeInt(0);
