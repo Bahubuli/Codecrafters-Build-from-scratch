@@ -31,12 +31,14 @@ public class Main {
         final String description;
         final String body;
         final String dirName;
+        final boolean isFork;
 
-        Skill(String name, String description, String body, String dirName) {
+        Skill(String name, String description, String body, String dirName, boolean isFork) {
             this.name = name;
             this.description = description;
             this.body = body;
             this.dirName = dirName;
+            this.isFork = isFork;
         }
     }
 
@@ -147,23 +149,8 @@ public class Main {
                         .build())
                 .build();
 
-        ChatCompletionCreateParams.Builder createParamsBuilder = ChatCompletionCreateParams.builder()
-                .model("anthropic/claude-haiku-4.5");
-
         List<Skill> skills = loadSkills();
-        if (!skills.isEmpty()) {
-            StringBuilder systemPrompt = new StringBuilder();
-            systemPrompt.append("You have access to the following skills:\n\n");
-            for (int i = 0; i < skills.size(); i++) {
-                Skill s = skills.get(i);
-                systemPrompt.append("- ").append(s.name).append(": ").append(s.description);
-                if (i < skills.size() - 1) {
-                    systemPrompt.append("\n");
-                }
-            }
-            systemPrompt.append("\n\nIf a skill matches the user's request, call the Skill tool with its name and follow the instructions it returns.");
-            createParamsBuilder.addSystemMessage(systemPrompt.toString());
-        }
+        boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
 
         // Stacked skills expansion
         String trimmedPrompt = prompt.trim();
@@ -197,12 +184,47 @@ public class Main {
                 if (matchedSkill != null) {
                     expandedSkills.add(matchedSkill);
                     currentIndex = tokenEnd;
+                    if (matchedSkill.isFork) {
+                        // A skill that asks for a subagent ends a stacking run
+                        break;
+                    }
                     continue;
                 }
             }
 
             sharedArgs = trimmedPrompt.substring(currentIndex).trim();
             break;
+        }
+
+        // If invoked directly via slash command and is a fork skill
+        if (expandedSkills.size() == 1 && expandedSkills.get(0).isFork) {
+            Skill skill = expandedSkills.get(0);
+            ChatCompletionCreateParams.Builder subagentParams = ChatCompletionCreateParams.builder()
+                    .model("anthropic/claude-haiku-4.5")
+                    .addUserMessage(substitutePlaceholders(skill.body, sharedArgs))
+                    .addTool(readTool)
+                    .addTool(writeTool)
+                    .addTool(bashTool);
+            String ans = runAgentLoop(client, subagentParams, readTool, writeTool, bashTool, skillTool, skills, isWindows);
+            System.out.print(ans);
+            return;
+        }
+
+        ChatCompletionCreateParams.Builder createParamsBuilder = ChatCompletionCreateParams.builder()
+                .model("anthropic/claude-haiku-4.5");
+
+        if (!skills.isEmpty()) {
+            StringBuilder systemPrompt = new StringBuilder();
+            systemPrompt.append("You have access to the following skills:\n\n");
+            for (int i = 0; i < skills.size(); i++) {
+                Skill s = skills.get(i);
+                systemPrompt.append("- ").append(s.name).append(": ").append(s.description);
+                if (i < skills.size() - 1) {
+                    systemPrompt.append("\n");
+                }
+            }
+            systemPrompt.append("\n\nIf a skill matches the user's request, call the Skill tool with its name and follow the instructions it returns.");
+            createParamsBuilder.addSystemMessage(systemPrompt.toString());
         }
 
         if (expandedSkills.isEmpty()) {
@@ -221,7 +243,19 @@ public class Main {
                 .addTool(bashTool)
                 .addTool(skillTool);
 
-        boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+        String finalResponse = runAgentLoop(client, createParamsBuilder, readTool, writeTool, bashTool, skillTool, skills, isWindows);
+        System.out.print(finalResponse);
+    }
+
+    private static String runAgentLoop(
+            OpenAIClient client,
+            ChatCompletionCreateParams.Builder createParamsBuilder,
+            ChatCompletionTool readTool,
+            ChatCompletionTool writeTool,
+            ChatCompletionTool bashTool,
+            ChatCompletionTool skillTool,
+            List<Skill> skills,
+            boolean isWindows) {
 
         while (true) {
             ChatCompletion response = client.chat().completions().create(createParamsBuilder.build());
@@ -234,8 +268,7 @@ public class Main {
             createParamsBuilder.addMessage(assistantMessage);
 
             if (assistantMessage.toolCalls().isEmpty() || assistantMessage.toolCalls().get().isEmpty()) {
-                System.out.print(assistantMessage.content().orElse(""));
-                break;
+                return assistantMessage.content().orElse("");
             }
 
             for (ChatCompletionMessageToolCall toolCall : assistantMessage.toolCalls().get()) {
@@ -308,9 +341,21 @@ public class Main {
                             }
                         }
                         if (matched != null) {
-                            String skillPath = ".claude/skills/" + matched.dirName;
-                            String header = "Skill: " + matched.name + " (located at " + skillPath + ")\nPaths in the instructions below are relative to that folder.\n\n";
-                            result = header + substitutePlaceholders(matched.body, skillArgs);
+                            if (matched.isFork) {
+                                // Run in subagent
+                                ChatCompletionCreateParams.Builder subagentParams = ChatCompletionCreateParams.builder()
+                                        .model("anthropic/claude-haiku-4.5")
+                                        .addUserMessage(substitutePlaceholders(matched.body, skillArgs))
+                                        .addTool(readTool)
+                                        .addTool(writeTool)
+                                        .addTool(bashTool);
+                                String subagentResult = runAgentLoop(client, subagentParams, readTool, writeTool, bashTool, skillTool, skills, isWindows);
+                                result = "Skill " + matched.name + " ran in a separate context and returned: " + subagentResult;
+                            } else {
+                                String skillPath = ".claude/skills/" + matched.dirName;
+                                String header = "Skill: " + matched.name + " (located at " + skillPath + ")\nPaths in the instructions below are relative to that folder.\n\n";
+                                result = header + substitutePlaceholders(matched.body, skillArgs);
+                            }
                         } else {
                             result = "Error: Skill not found: " + skillName;
                         }
@@ -420,6 +465,7 @@ public class Main {
 
         String name = folderName;
         String description = "";
+        String context = "";
 
         String currentKey = null;
         StringBuilder currentVal = new StringBuilder();
@@ -433,6 +479,8 @@ public class Main {
                         name = cleanYamlValue(currentVal.toString().trim());
                     } else if (currentKey.equals("description")) {
                         description = cleanYamlValue(currentVal.toString().trim());
+                    } else if (currentKey.equals("context")) {
+                        context = cleanYamlValue(currentVal.toString().trim());
                     }
                 }
                 currentKey = line.substring(0, colonIdx).trim();
@@ -447,8 +495,12 @@ public class Main {
                 name = cleanYamlValue(currentVal.toString().trim());
             } else if (currentKey.equals("description")) {
                 description = cleanYamlValue(currentVal.toString().trim());
+            } else if (currentKey.equals("context")) {
+                context = cleanYamlValue(currentVal.toString().trim());
             }
         }
+
+        boolean isFork = "fork".equalsIgnoreCase(context);
 
         StringBuilder bodyBuilder = new StringBuilder();
         for (int i = secondDelimiter + 1; i < lines.length; i++) {
@@ -459,7 +511,7 @@ public class Main {
         }
         String body = bodyBuilder.toString().trim();
 
-        return new Skill(name, description, body, folderName);
+        return new Skill(name, description, body, folderName, isFork);
     }
 
     private static String cleanYamlValue(String val) {
