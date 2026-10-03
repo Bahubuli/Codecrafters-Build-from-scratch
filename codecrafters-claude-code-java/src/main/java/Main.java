@@ -185,7 +185,9 @@ public class Main {
             createParamsBuilder.addUserMessage(prompt);
         } else {
             for (Skill skill : expandedSkills) {
-                String content = substitutePlaceholders(skill.body, sharedArgs);
+                String skillPath = ".claude/skills/" + skill.dirName;
+                String header = "Skill: " + skill.name + " (located at " + skillPath + ")\nPaths in the instructions below are relative to that folder.\n\n";
+                String content = header + substitutePlaceholders(skill.body, sharedArgs);
                 createParamsBuilder.addUserMessage(content);
             }
         }
