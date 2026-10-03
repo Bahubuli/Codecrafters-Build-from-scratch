@@ -141,22 +141,56 @@ public class Main {
             createParamsBuilder.addSystemMessage(systemPrompt.toString());
         }
 
-        String userPrompt = prompt;
-        if (prompt.startsWith("/")) {
-            String trimmedPrompt = prompt.trim();
-            String command = trimmedPrompt.substring(1).split("\\s+")[0];
-            String argsPart = trimmedPrompt.substring(1 + command.length()).trim();
+        // Stacked skills expansion
+        String trimmedPrompt = prompt.trim();
+        List<Skill> expandedSkills = new ArrayList<>();
+        String sharedArgs = "";
 
-            for (Skill skill : skills) {
-                if (skill.name.equalsIgnoreCase(command) || skill.dirName.equalsIgnoreCase(command)) {
-                    userPrompt = substitutePlaceholders(skill.body, argsPart);
-                    break;
+        int currentIndex = 0;
+        while (currentIndex < trimmedPrompt.length()) {
+            while (currentIndex < trimmedPrompt.length() && Character.isWhitespace(trimmedPrompt.charAt(currentIndex))) {
+                currentIndex++;
+            }
+            if (currentIndex >= trimmedPrompt.length()) {
+                break;
+            }
+
+            int tokenEnd = currentIndex;
+            while (tokenEnd < trimmedPrompt.length() && !Character.isWhitespace(trimmedPrompt.charAt(tokenEnd))) {
+                tokenEnd++;
+            }
+
+            String token = trimmedPrompt.substring(currentIndex, tokenEnd);
+            if (token.startsWith("/")) {
+                String skillName = token.substring(1);
+                Skill matchedSkill = null;
+                for (Skill s : skills) {
+                    if (s.name.equalsIgnoreCase(skillName) || s.dirName.equalsIgnoreCase(skillName)) {
+                        matchedSkill = s;
+                        break;
+                    }
                 }
+                if (matchedSkill != null) {
+                    expandedSkills.add(matchedSkill);
+                    currentIndex = tokenEnd;
+                    continue;
+                }
+            }
+
+            sharedArgs = trimmedPrompt.substring(currentIndex).trim();
+            break;
+        }
+
+        if (expandedSkills.isEmpty()) {
+            createParamsBuilder.addUserMessage(prompt);
+        } else {
+            for (Skill skill : expandedSkills) {
+                String content = substitutePlaceholders(skill.body, sharedArgs);
+                createParamsBuilder.addUserMessage(content);
             }
         }
 
-        createParamsBuilder.addUserMessage(userPrompt)
-                .addTool(readTool)
+        createParamsBuilder.addTool(readTool)
                 .addTool(writeTool)
                 .addTool(bashTool);
 
