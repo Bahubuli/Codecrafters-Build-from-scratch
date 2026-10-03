@@ -27,10 +27,14 @@ public class Main {
     static class Skill {
         final String name;
         final String description;
+        final String body;
+        final String dirName;
 
-        Skill(String name, String description) {
+        Skill(String name, String description, String body, String dirName) {
             this.name = name;
             this.description = description;
+            this.body = body;
+            this.dirName = dirName;
         }
     }
 
@@ -135,7 +139,25 @@ public class Main {
             createParamsBuilder.addSystemMessage(systemPrompt.toString());
         }
 
-        createParamsBuilder.addUserMessage(prompt)
+        String userPrompt = prompt;
+        if (prompt.startsWith("/")) {
+            String trimmedPrompt = prompt.trim();
+            String command = trimmedPrompt.substring(1).split("\\s+")[0];
+            String argsPart = trimmedPrompt.substring(1 + command.length()).trim();
+
+            for (Skill skill : skills) {
+                if (skill.name.equalsIgnoreCase(command) || skill.dirName.equalsIgnoreCase(command)) {
+                    if (argsPart.isEmpty()) {
+                        userPrompt = skill.body;
+                    } else {
+                        userPrompt = skill.body + "\n\n" + argsPart;
+                    }
+                    break;
+                }
+            }
+        }
+
+        createParamsBuilder.addUserMessage(userPrompt)
                 .addTool(readTool)
                 .addTool(writeTool)
                 .addTool(bashTool);
@@ -313,7 +335,16 @@ public class Main {
             }
         }
 
-        return new Skill(name, description);
+        StringBuilder bodyBuilder = new StringBuilder();
+        for (int i = secondDelimiter + 1; i < lines.length; i++) {
+            bodyBuilder.append(lines[i]);
+            if (i < lines.length - 1) {
+                bodyBuilder.append("\n");
+            }
+        }
+        String body = bodyBuilder.toString().trim();
+
+        return new Skill(name, description, body, folderName);
     }
 
     private static String cleanYamlValue(String val) {
