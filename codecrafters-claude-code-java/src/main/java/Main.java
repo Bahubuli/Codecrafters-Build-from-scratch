@@ -124,6 +124,29 @@ public class Main {
                         .build())
                 .build();
 
+        FunctionParameters skillParams = FunctionParameters.builder()
+                .putAdditionalProperty("type", JsonValue.from("object"))
+                .putAdditionalProperty("properties", JsonValue.from(Map.of(
+                        "name", Map.of(
+                                "type", "string",
+                                "description", "The name of the skill to use"
+                        ),
+                        "args", Map.of(
+                                "type", "string",
+                                "description", "Optional arguments for the skill"
+                        )
+                )))
+                .putAdditionalProperty("required", JsonValue.from(List.of("name")))
+                .build();
+
+        ChatCompletionTool skillTool = ChatCompletionTool.builder()
+                .function(FunctionDefinition.builder()
+                        .name("Skill")
+                        .description("Load a skill's instructions into the conversation")
+                        .parameters(skillParams)
+                        .build())
+                .build();
+
         ChatCompletionCreateParams.Builder createParamsBuilder = ChatCompletionCreateParams.builder()
                 .model("anthropic/claude-haiku-4.5");
 
@@ -138,6 +161,7 @@ public class Main {
                     systemPrompt.append("\n");
                 }
             }
+            systemPrompt.append("\n\nIf a skill matches the user's request, call the Skill tool with its name and follow the instructions it returns.");
             createParamsBuilder.addSystemMessage(systemPrompt.toString());
         }
 
@@ -194,7 +218,8 @@ public class Main {
 
         createParamsBuilder.addTool(readTool)
                 .addTool(writeTool)
-                .addTool(bashTool);
+                .addTool(bashTool)
+                .addTool(skillTool);
 
         boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
 
@@ -269,6 +294,28 @@ public class Main {
                         result = sb.toString();
                     } catch (Exception e) {
                         result = "Error executing bash command: " + e.getMessage();
+                    }
+                } else if ("Skill".equalsIgnoreCase(funcName) || "skill".equalsIgnoreCase(funcName)) {
+                    try {
+                        JsonNode argsNode = OBJECT_MAPPER.readTree(arguments);
+                        String skillName = argsNode.has("name") ? argsNode.get("name").asText() : "";
+                        String skillArgs = argsNode.has("args") ? argsNode.get("args").asText() : "";
+                        Skill matched = null;
+                        for (Skill s : skills) {
+                            if (s.name.equalsIgnoreCase(skillName) || s.dirName.equalsIgnoreCase(skillName)) {
+                                matched = s;
+                                break;
+                            }
+                        }
+                        if (matched != null) {
+                            String skillPath = ".claude/skills/" + matched.dirName;
+                            String header = "Skill: " + matched.name + " (located at " + skillPath + ")\nPaths in the instructions below are relative to that folder.\n\n";
+                            result = header + substitutePlaceholders(matched.body, skillArgs);
+                        } else {
+                            result = "Error: Skill not found: " + skillName;
+                        }
+                    } catch (Exception e) {
+                        result = "Error executing Skill tool: " + e.getMessage();
                     }
                 } else {
                     result = "Error: Unknown tool " + funcName;
