@@ -16,11 +16,23 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
 public class Main {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    static class Skill {
+        final String name;
+        final String description;
+
+        Skill(String name, String description) {
+            this.name = name;
+            this.description = description;
+        }
+    }
 
     public static void main(String[] args) {
         if (args.length < 2 || !"-p".equals(args[0])) {
@@ -107,8 +119,23 @@ public class Main {
                 .build();
 
         ChatCompletionCreateParams.Builder createParamsBuilder = ChatCompletionCreateParams.builder()
-                .model("anthropic/claude-haiku-4.5")
-                .addUserMessage(prompt)
+                .model("anthropic/claude-haiku-4.5");
+
+        List<Skill> skills = loadSkills();
+        if (!skills.isEmpty()) {
+            StringBuilder systemPrompt = new StringBuilder();
+            systemPrompt.append("You have access to the following skills:\n\n");
+            for (int i = 0; i < skills.size(); i++) {
+                Skill s = skills.get(i);
+                systemPrompt.append("- ").append(s.name).append(": ").append(s.description);
+                if (i < skills.size() - 1) {
+                    systemPrompt.append("\n");
+                }
+            }
+            createParamsBuilder.addSystemMessage(systemPrompt.toString());
+        }
+
+        createParamsBuilder.addUserMessage(prompt)
                 .addTool(readTool)
                 .addTool(writeTool)
                 .addTool(bashTool);
@@ -199,5 +226,104 @@ public class Main {
                 );
             }
         }
+    }
+
+    private static List<Skill> loadSkills() {
+        List<Skill> skills = new ArrayList<>();
+        Path skillsDir = Path.of(".claude", "skills");
+        if (!Files.exists(skillsDir) || !Files.isDirectory(skillsDir)) {
+            return skills;
+        }
+
+        try (var stream = Files.list(skillsDir)) {
+            List<Path> dirs = stream.filter(Files::isDirectory).sorted().toList();
+            for (Path dir : dirs) {
+                Path skillFile = dir.resolve("SKILL.md");
+                if (!Files.exists(skillFile) || !Files.isRegularFile(skillFile)) {
+                    continue;
+                }
+                try {
+                    String content = Files.readString(skillFile);
+                    Skill skill = parseSkill(dir.getFileName().toString(), content);
+                    if (skill != null) {
+                        skills.add(skill);
+                    }
+                } catch (IOException e) {
+                    System.err.println("Error reading skill file: " + skillFile + " : " + e.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error listing skills dir: " + e.getMessage());
+        }
+
+        skills.sort(Comparator.comparing(s -> s.name));
+        return skills;
+    }
+
+    private static Skill parseSkill(String folderName, String content) {
+        String[] lines = content.split("\\r?\\n");
+        int firstDelimiter = -1;
+        int secondDelimiter = -1;
+
+        for (int i = 0; i < lines.length; i++) {
+            String trimmed = lines[i].trim();
+            if (trimmed.equals("---")) {
+                if (firstDelimiter == -1) {
+                    firstDelimiter = i;
+                } else {
+                    secondDelimiter = i;
+                    break;
+                }
+            }
+        }
+
+        if (firstDelimiter == -1 || secondDelimiter == -1 || secondDelimiter <= firstDelimiter) {
+            return null;
+        }
+
+        String name = folderName;
+        String description = "";
+
+        String currentKey = null;
+        StringBuilder currentVal = new StringBuilder();
+
+        for (int i = firstDelimiter + 1; i < secondDelimiter; i++) {
+            String line = lines[i];
+            int colonIdx = line.indexOf(':');
+            if (colonIdx > 0 && !line.startsWith(" ") && !line.startsWith("\t")) {
+                if (currentKey != null) {
+                    if (currentKey.equals("name") && !currentVal.toString().trim().isEmpty()) {
+                        name = cleanYamlValue(currentVal.toString().trim());
+                    } else if (currentKey.equals("description")) {
+                        description = cleanYamlValue(currentVal.toString().trim());
+                    }
+                }
+                currentKey = line.substring(0, colonIdx).trim();
+                currentVal = new StringBuilder(line.substring(colonIdx + 1).trim());
+            } else if (currentKey != null) {
+                currentVal.append(" ").append(line.trim());
+            }
+        }
+
+        if (currentKey != null) {
+            if (currentKey.equals("name") && !currentVal.toString().trim().isEmpty()) {
+                name = cleanYamlValue(currentVal.toString().trim());
+            } else if (currentKey.equals("description")) {
+                description = cleanYamlValue(currentVal.toString().trim());
+            }
+        }
+
+        return new Skill(name, description);
+    }
+
+    private static String cleanYamlValue(String val) {
+        if (val == null) return "";
+        val = val.trim();
+        if ((val.startsWith("\"") && val.endsWith("\"")) || (val.startsWith("'") && val.endsWith("'"))) {
+            if (val.length() >= 2) {
+                val = val.substring(1, val.length() - 1);
+            }
+        }
+        return val;
     }
 }
