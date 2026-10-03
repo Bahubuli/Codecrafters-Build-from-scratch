@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Main {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -147,11 +149,7 @@ public class Main {
 
             for (Skill skill : skills) {
                 if (skill.name.equalsIgnoreCase(command) || skill.dirName.equalsIgnoreCase(command)) {
-                    if (argsPart.isEmpty()) {
-                        userPrompt = skill.body;
-                    } else {
-                        userPrompt = skill.body + "\n\n" + argsPart;
-                    }
+                    userPrompt = substitutePlaceholders(skill.body, argsPart);
                     break;
                 }
             }
@@ -248,6 +246,40 @@ public class Main {
                 );
             }
         }
+    }
+
+    private static String substitutePlaceholders(String body, String rawArgs) {
+        if (body == null) return "";
+        String trimmedArgs = rawArgs == null ? "" : rawArgs.trim();
+        String[] argTokens = trimmedArgs.isEmpty() ? new String[0] : trimmedArgs.split("\\s+");
+
+        // 1. $ARGUMENTS[n]
+        Pattern pArray = Pattern.compile("\\$ARGUMENTS\\[(\\d+)\\]");
+        Matcher mArray = pArray.matcher(body);
+        StringBuilder sb1 = new StringBuilder();
+        while (mArray.find()) {
+            int idx = Integer.parseInt(mArray.group(1));
+            String val = (idx >= 0 && idx < argTokens.length) ? argTokens[idx] : "";
+            mArray.appendReplacement(sb1, Matcher.quoteReplacement(val));
+        }
+        mArray.appendTail(sb1);
+        String step1 = sb1.toString();
+
+        // 2. $ARGUMENTS
+        String step2 = step1.replace("$ARGUMENTS", trimmedArgs);
+
+        // 3. $n (e.g. $0, $1)
+        Pattern pPos = Pattern.compile("\\$(\\d+)");
+        Matcher mPos = pPos.matcher(step2);
+        StringBuilder sb3 = new StringBuilder();
+        while (mPos.find()) {
+            int idx = Integer.parseInt(mPos.group(1));
+            String val = (idx >= 0 && idx < argTokens.length) ? argTokens[idx] : "";
+            mPos.appendReplacement(sb3, Matcher.quoteReplacement(val));
+        }
+        mPos.appendTail(sb3);
+
+        return sb3.toString();
     }
 
     private static List<Skill> loadSkills() {
